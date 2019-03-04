@@ -204,7 +204,7 @@ function split() {
 			source "${RECORDING}.metadata.set$(( CURRENT_SET + 1 ))"
 			SET_END=$START_TIME
 		fi
-		FILENAME="$MATCH_TYPE $MATCH_NUMBER: $OUR_TEAM vs $THEIR_TEAM - H${HALF}S${SET}.mkv"
+		FILENAME="$MATCH_TYPE $MATCH_NUMBER: $OUR_TEAM vs $THEIR_TEAM - H$(( HALF + 1 ))S${SET}.mkv"
 		ffmpeg -ss "$SET_START" -to "$SET_END" -i "${RECORDING}.mkv" -c copy "$FILENAME"
 	done;
 	return
