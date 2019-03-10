@@ -210,6 +210,58 @@ function split() {
 	return
 }
 
+function encode() {
+	VALUE_ARG=
+	for ARG in "$@"
+	do
+		if [ "$VALUE_ARG" = --bitrate ]; then
+			BITRATE=$ARG
+			VALUE_ARG=
+		elif [ "$VALUE_ARG" = --crop ]; then
+			CROP=$ARG
+			VALUE_ARG=
+		elif [ $ARG = "--nvidia" ]; then
+			NVIDIA=true
+		elif [ $ARG = "--vaapi" ]; then
+		  VAAPI=true
+		elif [ $ARG = "--bitrate" ]; then
+			VALUE_ARG=$ARG
+		elif [ $ARG = "--crop" ]; then
+			VALUE_ARG=$ARG
+		else
+			echo "File: $ARG, nvidia: $NVIDIA, vaapi: $VAAPI, bitrate=$BITRATE, CROP=$CROP"
+
+			if [ "$NVIDIA" ]; then
+				CMD="optirun ffmpeg"
+			else
+				CMD="ffmpeg"
+			fi
+
+			if [ "$NVIDIA" ]; then
+				CMD="$CMD -hwaccel nvdec"
+			fi
+
+			CMD="$CMD -i $ARG"
+
+			if [ "$CROP" ]; then
+				CMD="$CMD -filter:v crop=$CROP"
+			fi
+
+			if [ "$NVIDIA" ]; then
+				CMD="$CMD -c:v h264_nvenc"
+			fi
+
+			if [ "$BITRATE" ]; then
+				CMD="$CMD -b:v $BITRATE"
+			fi
+
+			CMD="$CMD ${ARG%.*}-encoded.mkv"
+
+			$CMD
+		fi
+	done
+}
+
 function reset() {
 	rm -rf "${RECORDING}.list" "${RECORDING}.metadata.global" "${RECORDING}.metadata.set"*
 }
@@ -227,6 +279,8 @@ Usage:
 		Split the match into a separate video for each set
 	$0 reset <code>
 		Reset data about sets, times, etc
+	$0 encode [--nvidia|--vaapi] [--bitrate=<rate>] [--crop=w:h:x:y] <files...>
+		Reencode the specified files with the given transforms
 
 EOF
 }
@@ -259,6 +313,9 @@ case $1 in
 "reset")
 	RECORDING=$2
 	reset
+	;;
+"encode")
+	encode "${@:2}"
 	;;
 esac
 
