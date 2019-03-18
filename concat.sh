@@ -120,7 +120,7 @@ EOF
 function read_time() {
 	while true; do
 		read TIMECODE
-		if echo "$TIMECODE" > egrep '[0-9]{2}:[0-9]{2}:[0-9]{2}'; then
+		if echo "$TIMECODE" | egrep '[0-9]{2}:[0-9]{2}:[0-9]{2}'; then
 			HOURS=${TIMECODE:0:2}
 			MINUTES=${TIMECODE:3:2}
 			SECONDS=${TIMECODE:6:2}
