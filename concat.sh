@@ -11,6 +11,11 @@ function read_source_files() {
 	LISTING="./${RECORDING}.list"
 	OUTPUT="./${RECORDING}.mkv"
 
+	if [ -f "$LISTING" ]; then
+		echo "Listing file already exists"
+		return
+	fi
+
 	echo "file './GOPR${RECORDING}.MP4'" | tee "$LISTING" > /dev/null
 
 	for FILE in ./GP*${RECORDING}.MP4; do
@@ -189,6 +194,30 @@ function join() {
 	ffmpeg -f concat -safe 0 -i "$LISTING" -c copy "$OUTPUT"
 }
 
+function stabilise() {
+	RECORDING=$1
+	read_source_files
+	cat "$LISTING" | tr '\n' '\0' | xargs -0 -n 1 -P 2 $0 stabilise-file-detect
+	cat "$LISTING" | tr '\n' '\0' | xargs -0 -n 1 -P 8 $0 stabilise-file-transform
+}
+
+function stabilise_segment_detect() {
+	FILE=${1#file \'}
+	FILE=${FILE%\'}
+	TRANSFORMS="${FILE}.trf"
+	ffmpeg -y -vaapi_device /dev/dri/renderD128 -hwaccel vaapi -i "$FILE" -vf "vidstabdetect=result=$TRANSFORMS" -f null -
+}
+
+function stabilise_file_transform() {
+	FILE=${1#file \'}
+	FILE=${FILE%\'}
+	TRANSFORMS="${FILE}.trf"
+	TEMP="$FILE.tmp.mkv"
+	ffmpeg -y -vaapi_device /dev/dri/renderD128 -hwaccel vaapi -i "$FILE" -vf "vidstabtransform=input=$TRANSFORMS,rotate='PI/5:ow=hypot(iw,ih):oh=ow',crop=1800:1600:300:800,unsharp=5:5:0.8:3:3:0.4,format=nv12,hwupload" -c:a copy -c:v h264_vaapi -qp 17 -f matroska "$TEMP"
+	rm -rf "$FILE"
+	mv "$TEMP" "$FILE"
+}
+
 function split() {
 	read_global_state
 	echo_state
@@ -205,7 +234,7 @@ function split() {
 			SET_END=$START_TIME
 		fi
 		FILENAME="$MATCH_TYPE $MATCH_NUMBER: $OUR_TEAM vs $THEIR_TEAM - H$(( HALF + 1 ))S${SET}.mkv"
-		ffmpeg -ss "$SET_START" -to "$SET_END" -i "${RECORDING}.mkv" -c copy "$FILENAME"
+		optirun ffmpeg -y -hwaccel nvdec -ss "$SET_START" -to "$SET_END" -i "${RECORDING}.mkv" -vf "lenscorrection=cx=0.5:cy=0.5:k1=-0.25:k2=0.022" -c:a copy -c:v h264_nvenc -qp 17 "$FILENAME"
 	done;
 	return
 }
@@ -271,6 +300,8 @@ function help() {
 Usage:
 	$0 (-h|--help)
 		Help
+	$0 stabilise <code>
+		Stabilise each segment of video <code>
 	$0 join <code>
 		Join the segments of the video <code> together
 	$0 tag <code>
@@ -297,6 +328,15 @@ case $1 in
 	;;
 "")
 	help
+	;;
+"stabilise")
+	stabilise "${@:2}"
+	;;
+"stabilise-file-detect")
+	stabilise_segment_detect "${@:2}"
+	;;
+"stabilise-file-transform")
+	stabilise_file_transform "${@:2}"
 	;;
 "join")
 	RECORDING=$2
