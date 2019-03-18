@@ -44,7 +44,7 @@ const findNumFrames = async (sourceSegments) => {
     .reduce((sum, frames) => sum + frames, 0);
 };
 
-const join = async ({ code, options }) => {
+export const join = async ({ code, options }) => {
   const sourceSegments = await findSourceSegments(code);
   console.log('Found source segments:\n', sourceSegments);
   const totalFrames = await findNumFrames(sourceSegments);
