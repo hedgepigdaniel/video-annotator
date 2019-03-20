@@ -16,7 +16,13 @@ const VAAPI_QP = 23;
 const analyseQueue = new Queue(2);
 const encodeQueue = new Queue(4);
 
-const analyse = (sourceFileName, destFileName, { start, duration, end }) =>
+const analyse = (sourceFileName, destFileName, {
+  start,
+  duration,
+  end,
+  stabilise,
+  stabiliseFisheye,
+}) =>
   analyseQueue.add(
     () => new Promise((resolve, reject) => Ffmpeg()
       .on('start', console.log)
@@ -34,6 +40,22 @@ const analyse = (sourceFileName, destFileName, { start, duration, end }) =>
         end && `-to ${end}`,
       ].filter(Boolean))
       .videoFilters([
+        stabiliseFisheye && {
+          filter: 'lensfun',
+          options: {
+            make: 'GoPro',
+            model: 'HERO5 Black',
+            lens_model: 'fixed lens',
+            mode: 'geometry',
+            target_geometry: 'fisheye',
+          },
+        },
+        stabiliseFisheye && {
+          filter: 'format',
+          options: {
+            pix_fmts: 'nv12',
+          },
+        },
         {
           filter: 'vidstabdetect',
           options: {
@@ -43,13 +65,21 @@ const analyse = (sourceFileName, destFileName, { start, duration, end }) =>
             stepsize: 12,
           },
         },
-      ])
+      ].filter(Boolean))
       .format('null')
       .output('-')
       .run())
   );
 
-const encode = async (sourceFileName, destFileName, { start, duration, end, rotate, crop }) =>
+const encode = async (sourceFileName, destFileName, {
+  start,
+  duration,
+  end,
+  rotate,
+  crop,
+  stabilise,
+  stabiliseFisheye,
+}) =>
   encodeQueue.add(() => new Promise((resolve, reject) => Ffmpeg()
     .on('start', console.log)
     .on('codecData', console.log)
@@ -66,7 +96,23 @@ const encode = async (sourceFileName, destFileName, { start, duration, end, rota
       end && `-to ${end}`,
     ].filter(Boolean))
     .videoFilters([
-      {
+      stabilise && stabiliseFisheye && {
+        filter: 'lensfun',
+        options: {
+          make: 'GoPro',
+          model: 'HERO5 Black',
+          lens_model: 'fixed lens',
+          mode: 'geometry',
+          target_geometry: 'fisheye',
+        },
+      },
+      stabilise && stabiliseFisheye && {
+        filter: 'format',
+        options: {
+          pix_fmts: 'nv12',
+        },
+      },
+      stabilise && {
         filter: 'vidstabtransform',
         options: {
           input: `${destFileName}.trf`,
@@ -76,31 +122,37 @@ const encode = async (sourceFileName, destFileName, { start, duration, end, rota
           crop: 'black',
         },
       },
-      {
-        filter: 'unsharp',
-        options: {
-          luma_msize_x: 5,
-          luma_msize_y: 5,
-          luma_amount: 0.8,
-          chroma_msize_x: 5,
-          chroma_msize_y: 5,
-          chroma_amount: 0.4,
-        },
-      },
-      {
+      stabilise && stabiliseFisheye && projection !== 'fisheye' && {
         filter: 'format',
         options: {
           pix_fmts: 'nv12',
         },
       },
-      {
+      stabilise && stabiliseFisheye && projection !== 'fisheye' && {
         filter: 'lensfun',
         options: {
           make: 'GoPro',
           model: 'HERO5 Black',
           lens_model: 'fixed lens',
           mode: 'geometry',
-          target_geometry: 'rectilinear',
+          target_geometry: 'fisheye',
+          reverse: 1,
+        },
+      },
+      projection && ((stabilise && !stabiliseFisheye) || projection !== 'fisheye') && {
+        filter: 'format',
+        options: {
+          pix_fmts: 'nv12',
+        },
+      },
+      projection && ((stabilise && !stabiliseFisheye) || projection !== 'fisheye') && {
+        filter: 'lensfun',
+        options: {
+          make: 'GoPro',
+          model: 'HERO5 Black',
+          lens_model: 'fixed lens',
+          mode: 'geometry',
+          target_geometry: projection,
         },
       },
       rotate && {
@@ -114,10 +166,21 @@ const encode = async (sourceFileName, destFileName, { start, duration, end, rota
       crop && {
         filter: `crop=${crop}`,
       },
-      {
+      stabilise && {
         filter: 'format',
         options: {
           pix_fmts: 'nv12',
+        },
+      },
+      stabilise && {
+        filter: 'unsharp',
+        options: {
+          luma_msize_x: 5,
+          luma_msize_y: 5,
+          luma_amount: 0.8,
+          chroma_msize_x: 5,
+          chroma_msize_y: 5,
+          chroma_amount: 0.4,
         },
       },
       {
@@ -140,11 +203,20 @@ export const render = async ({
   const {
     'encode-only': encodeOnly,
     'analyse-only': analyseOnly,
+    'stabilise-fisheye': stabiliseFisheye,
+    projection = 'fisheye_stereographic',
+    stabilise,
+    ...otherOptions
   } = options;
-  if (!encodeOnly) {
-    await analyse(sourceFileName, destFileName, options)
+  const optionsWithDefaults = {
+    stabiliseFisheye,
+    stabilise,
+    ...otherOptions
+  };
+  if (!encodeOnly && stabilise) {
+    await analyse(sourceFileName, destFileName, optionsWithDefaults)
   }
   if (!analyseOnly) {
-    await encode(sourceFileName, destFileName, options);
+    await encode(sourceFileName, destFileName, optionsWithDefaults);
   }
 };

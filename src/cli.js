@@ -25,8 +25,23 @@ vorpal
   .option('-e, --end <time>', 'The end point in the source')
   .option('--rotate <angle>', 'Optional angle to rotate the source by')
   .option('--crop <options>', 'Crop to apply (after rotation): "width:height:top:left"')
-  .option('-c, --encode-only', 'Skip analyze stage, use existing stabilisation data if applicable')
-  .option('-a, --analyse-only', 'Skip encode stage, generate stabilisation data only')
+  .option('--stabilise', 'Apply stabilisation to remove camera shaking')
+  .option(
+    '--stabilise-fisheye',
+    'Convert to the equidistant fisheye projection before doing stabilisation (marginally reduces warping)',
+  )
+  .option(
+    '-p, --projection <projection>',
+    'Convert to the specified lens projection (default fisheye_stereographic). See lensfun docs for options.',
+    )
+  .option(
+    '-c, --encode-only',
+    'Skip analyze stage, use existing stabilisation data if applicable',
+  )
+  .option(
+    '-a, --analyse-only',
+    'Skip encode stage, generate stabilisation data only',
+  )
   .action(callbackify(render));
 
 vorpal.parse(process.argv);
