@@ -222,6 +222,7 @@ function split() {
 	read_global_state
 	echo_state
 	NUM_SETS=$SET
+	ITEMS=()
 	for CURRENT_SET in $(seq 0 $(( $NUM_SETS - 1 ))); do
 		source "${RECORDING}.metadata.set$CURRENT_SET"
 		SET_START=$START_TIME
@@ -233,10 +234,43 @@ function split() {
 			source "${RECORDING}.metadata.set$(( CURRENT_SET + 1 ))"
 			SET_END=$START_TIME
 		fi
-		FILENAME="$MATCH_TYPE $MATCH_NUMBER: $OUR_TEAM vs $THEIR_TEAM - H$(( HALF + 1 ))S${SET}.mkv"
-		optirun ffmpeg -y -hwaccel nvdec -ss "$SET_START" -to "$SET_END" -i "${RECORDING}.mkv" -vf "lenscorrection=cx=0.5:cy=0.5:k1=-0.25:k2=0.022" -c:a copy -c:v h264_nvenc -qp 17 "$FILENAME"
+		FILENAME="$MATCH_TYPE $MATCH_NUMBER - $OUR_TEAM vs $THEIR_TEAM - H$(( HALF + 1 ))S${SET}.mkv"
+		# optirun ffmpeg -y -ss "$SET_START" -to "$SET_END" -i "${RECORDING}.mkv" -c copy "$FILENAME"
+		ITEMS+=( "$RECORDING $SET_START $SET_END $FILENAME" )
 	done;
+
+	# printf "%s\0" "${ITEMS[@]}" | xargs -0 -n 1 -P 2 $0 split-segment-detect
+	printf "%s\0" "${ITEMS[@]}" | xargs -0 -n 1 -P 4 $0 split-segment-transform
+
 	return
+}
+
+function split_segment_detect() {
+	RECORDING=$1
+	SEGMENT_START=$2
+	SEGMENT_END=$3
+	OUTPUT="${@:4}"
+
+	echo "ANALYSING: \"$OUTPUT\""
+	echo "RECORDING: $RECORDING"
+	echo "START: $SEGMENT_START"
+	echo "END: $SEGMENT_END"
+
+	node ../../video-annotator/dist/cli.js render "$RECORDING.mkv" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" --analyse-only
+}
+
+function split_segment_transform() {
+	RECORDING=$1
+	SEGMENT_START=$2
+	SEGMENT_END=$3
+	OUTPUT="${@:4}"
+
+	echo "ENCODING: \"$OUTPUT\""
+	echo "RECORDING: $RECORDING"
+	echo "START: $SEGMENT_START"
+	echo "END: $SEGMENT_END"
+
+	node ../../video-annotator/dist/cli.js render "$RECORDING.mkv" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" --encode-only
 }
 
 function encode() {
@@ -349,6 +383,12 @@ case $1 in
 "split")
 	RECORDING=$2
 	split
+	;;
+"split-segment-detect")
+	split_segment_detect ${@:2}
+	;;
+"split-segment-transform")
+	split_segment_transform ${@:2}
 	;;
 "reset")
 	RECORDING=$2

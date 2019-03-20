@@ -22,8 +22,11 @@ vorpal
   .description('Extract part of a source video and write it to a file')
   .option('-s, --start <time>', 'The starting point in the source')
   .option('-t, --duration <time>', 'The duration of the output')
-  .option('-e, --encode-only', 'Skip analyze stage, use existing stabilisation data if applicable')
-  .option('-e, --analyse-only', 'Skip encode stage, generate stabilisation data only')
+  .option('-e, --end <time>', 'The end point in the source')
+  .option('--rotate <angle>', 'Optional angle to rotate the source by')
+  .option('--crop <options>', 'Crop to apply (after rotation): "width:height:top:left"')
+  .option('-c, --encode-only', 'Skip analyze stage, use existing stabilisation data if applicable')
+  .option('-a, --analyse-only', 'Skip encode stage, generate stabilisation data only')
   .action(callbackify(render));
 
 vorpal.parse(process.argv);

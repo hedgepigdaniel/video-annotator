@@ -1,38 +1,56 @@
 import Ffmpeg from 'fluent-ffmpeg';
+import Queue from 'promise-queue';
+
+import { getMetadata } from './utils';
 
 const VAAPI_DEVICE = '/dev/dri/renderD128';
-const VAAPI_QP = 18;
 
-const analyse = (sourceFileName, destFileName, { start, duration }) => {
-  return new Promise((resolve, reject) => Ffmpeg()
-    .on('start', console.log)
-    .on('codecData', console.log)
-    .on('progress', ({ percent, currentFps }) =>
-      console.log(`${Math.floor(percent)}% (${currentFps}fps)`))
-    .on('error', reject)
-    .on('end', resolve)
-    .input(sourceFileName)
-    .inputOptions([
-      `-vaapi_device ${VAAPI_DEVICE}`,
-      '-hwaccel vaapi',
-      start && `-ss ${start}`,
-      duration && `-t ${duration}`,
-    ].filter(Boolean))
-    .videoFilters([
-      {
-        filter: 'vidstabdetect',
-        options: {
-          result: `${destFileName}.trf`,
+/**
+ * 19 - "visually lossless"
+ * 23 - great
+ * 25 - pretty good
+ * 28 - a bit dodgy
+ */
+const VAAPI_QP = 23;
+
+const analyseQueue = new Queue(2);
+const encodeQueue = new Queue(4);
+
+const analyse = (sourceFileName, destFileName, { start, duration, end }) =>
+  analyseQueue.add(
+    () => new Promise((resolve, reject) => Ffmpeg()
+      .on('start', console.log)
+      .on('codecData', console.log)
+      .on('progress', ({ percent, currentFps }) =>
+        console.log(`${Math.floor(percent)}% (${currentFps}fps)`))
+      .on('error', reject)
+      .on('end', resolve)
+      .input(sourceFileName)
+      .inputOptions([
+        `-vaapi_device ${VAAPI_DEVICE}`,
+        '-hwaccel vaapi',
+        start && `-ss ${start}`,
+        duration && `-t ${duration}`,
+        end && `-to ${end}`,
+      ].filter(Boolean))
+      .videoFilters([
+        {
+          filter: 'vidstabdetect',
+          options: {
+            result: `${destFileName}.trf`,
+            shakiness: 10,
+            mincontrast: 0.2,
+            stepsize: 12,
+          },
         },
-      },
-    ])
-    .format('null')
-    .output('-')
-    .run());
-};
+      ])
+      .format('null')
+      .output('-')
+      .run())
+  );
 
-const encode = async (sourceFileName, destFileName, { start, duration }) => {
-  return new Promise((resolve, reject) => Ffmpeg()
+const encode = async (sourceFileName, destFileName, { start, duration, end, rotate, crop }) =>
+  encodeQueue.add(() => new Promise((resolve, reject) => Ffmpeg()
     .on('start', console.log)
     .on('codecData', console.log)
     .on('progress', ({ percent, currentFps }) =>
@@ -45,6 +63,7 @@ const encode = async (sourceFileName, destFileName, { start, duration }) => {
       '-hwaccel vaapi',
       start && `-ss ${start}`,
       duration && `-t ${duration}`,
+      end && `-to ${end}`,
     ].filter(Boolean))
     .videoFilters([
       {
@@ -53,6 +72,8 @@ const encode = async (sourceFileName, destFileName, { start, duration }) => {
           input: `${destFileName}.trf`,
           optzoom: 0,
           interpol: 'bicubic',
+          smoothing: 30,
+          crop: 'black',
         },
       },
       {
@@ -66,15 +87,12 @@ const encode = async (sourceFileName, destFileName, { start, duration }) => {
           chroma_amount: 0.4,
         },
       },
-      // {
-      //   filter: 'lenscorrection',
-      //   options: {
-      //     cx: 0.5,
-      //     cy: 0.5,
-      //     k1: -0.25,
-      //     k2: 0.022,
-      //   },
-      // },
+      {
+        filter: 'format',
+        options: {
+          pix_fmts: 'nv12',
+        },
+      },
       {
         filter: 'lensfun',
         options: {
@@ -82,25 +100,19 @@ const encode = async (sourceFileName, destFileName, { start, duration }) => {
           model: 'HERO5 Black',
           lens_model: 'fixed lens',
           mode: 'geometry',
-          // interpolation: 'lanczos' // Slow
+          target_geometry: 'rectilinear',
         },
       },
-      {
+      rotate && {
         filter: 'rotate',
         options: {
-          angle: `2*PI/9`,
-          out_w: `hypot(iw,ih)`,
-          out_h: `out_w`,
+          angle: rotate,
+          out_w: `rotw(${rotate})`,
+          out_h: `roth(${rotate})`,
         },
       },
-      {
-        filter: 'crop',
-        options: {
-          out_w: 1900,
-          out_h: 1600,
-          x: 200,
-          y: 700,
-        },
+      crop && {
+        filter: `crop=${crop}`,
       },
       {
         filter: 'format',
@@ -111,14 +123,14 @@ const encode = async (sourceFileName, destFileName, { start, duration }) => {
       {
         filter: 'hwupload',
       },
-    ])
+    ].filter(Boolean))
     .output(destFileName)
     .outputOptions([
-      '-c:v h264_vaapi',
+      '-c:v hevc_vaapi',
       `-qp ${VAAPI_QP}`,
     ])
-    .run());
-}
+    .run()));
+
 
 export const render = async ({
   source: sourceFileName,
@@ -126,8 +138,6 @@ export const render = async ({
   options,
 }) => {
   const {
-    start,
-    duration,
     'encode-only': encodeOnly,
     'analyse-only': analyseOnly,
   } = options;

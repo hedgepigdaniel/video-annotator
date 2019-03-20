@@ -1,6 +1,8 @@
 import Ffmpeg from 'fluent-ffmpeg';
 import { promises as fs } from 'fs';
 
+import { getMetadata } from './utils';
+
 const findSourceSegments = async (code) => {
   const segments = [`GOPR${code}.MP4`];
   let initialStat;
@@ -29,16 +31,7 @@ const findSourceSegments = async (code) => {
 }
 
 const findNumFrames = async (sourceSegments) => {
-  const metadatas = await Promise.all(sourceSegments.map(
-    (sourceSegment) => new Promise((resolve, reject) =>
-      Ffmpeg.ffprobe(sourceSegment, (err, metadata) => {
-        if (err) {
-          return reject(err);
-        }
-        return resolve(metadata);
-      })
-    )
-  ));
+  const metadatas = await Promise.all(sourceSegments.map(getMetadata));
   return metadatas
     .map((metadata) => metadata.streams[0].nb_frames)
     .reduce((sum, frames) => sum + frames, 0);
