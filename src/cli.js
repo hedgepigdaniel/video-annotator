@@ -31,9 +31,13 @@ vorpal
     'Convert to the equidistant fisheye projection before doing stabilisation (marginally reduces warping)',
   )
   .option(
+    '-l, --lens-correct',
+    'Correct lens distortion',
+  )
+  .option(
     '-p, --projection <projection>',
-    'Convert to the specified lens projection (default fisheye_stereographic). See lensfun docs for options.',
-    )
+    'Use the specified lens projection (default fisheye_stereographic). See lensfun docs for options.',
+  )
   .option(
     '-c, --encode-only',
     'Skip analyze stage, use existing stabilisation data if applicable',

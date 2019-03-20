@@ -79,6 +79,8 @@ const encode = async (sourceFileName, destFileName, {
   crop,
   stabilise,
   stabiliseFisheye,
+  lensCorrect,
+  projection,
 }) =>
   encodeQueue.add(() => new Promise((resolve, reject) => Ffmpeg()
     .on('start', console.log)
@@ -139,13 +141,13 @@ const encode = async (sourceFileName, destFileName, {
           reverse: 1,
         },
       },
-      projection && ((stabilise && !stabiliseFisheye) || projection !== 'fisheye') && {
+      lensCorrect && projection && ((stabilise && !stabiliseFisheye) || projection !== 'fisheye') && {
         filter: 'format',
         options: {
           pix_fmts: 'nv12',
         },
       },
-      projection && ((stabilise && !stabiliseFisheye) || projection !== 'fisheye') && {
+      lensCorrect && projection && ((stabilise && !stabiliseFisheye) || projection !== 'fisheye') && {
         filter: 'lensfun',
         options: {
           make: 'GoPro',
@@ -204,6 +206,7 @@ export const render = async ({
     'encode-only': encodeOnly,
     'analyse-only': analyseOnly,
     'stabilise-fisheye': stabiliseFisheye,
+    'lens-correct': lensCorrect,
     projection = 'fisheye_stereographic',
     stabilise,
     ...otherOptions
@@ -211,8 +214,11 @@ export const render = async ({
   const optionsWithDefaults = {
     stabiliseFisheye,
     stabilise,
+    lensCorrect,
+    projection,
     ...otherOptions
   };
+  console.log(optionsWithDefaults);
   if (!encodeOnly && stabilise) {
     await analyse(sourceFileName, destFileName, optionsWithDefaults)
   }
