@@ -6,12 +6,13 @@ import { getMetadata } from './utils';
 const VAAPI_DEVICE = '/dev/dri/renderD128';
 
 /**
+ * H.264:
  * 19 - "visually lossless"
  * 23 - great
  * 25 - pretty good
  * 28 - a bit dodgy
  */
-const VAAPI_QP = 23;
+const VAAPI_QP = 19;
 
 const analyseQueue = new Queue(2);
 const encodeQueue = new Queue(4);
@@ -22,6 +23,7 @@ const analyse = (sourceFileName, destFileName, {
   end,
   stabilise,
   stabiliseFisheye,
+  scale,
 }) =>
   analyseQueue.add(
     () => new Promise((resolve, reject) => Ffmpeg()
@@ -35,11 +37,28 @@ const analyse = (sourceFileName, destFileName, {
       .inputOptions([
         `-vaapi_device ${VAAPI_DEVICE}`,
         '-hwaccel vaapi',
+        scale && '-hwaccel_output_format vaapi',
         start && `-ss ${start}`,
         duration && `-t ${duration}`,
         end && `-to ${end}`,
       ].filter(Boolean))
       .videoFilters([
+        scale && {
+          filter: 'scale_vaapi',
+          options: {
+            w: `iw*${scale / 100}`,
+            h: `ih*${scale / 100}`,
+          },
+        },
+        scale && {
+          filter: 'hwdownload',
+        },
+        scale && {
+          filter: 'format',
+          options: {
+            pix_fmts: 'nv12',
+          },
+        },
         stabiliseFisheye && {
           filter: 'lensfun',
           options: {
@@ -76,11 +95,16 @@ const encode = async (sourceFileName, destFileName, {
   duration,
   end,
   rotate,
-  crop,
+  cropLeft,
+  cropTop,
+  cropWidth,
+  cropHeight,
+  scale,
   stabilise,
   stabiliseFisheye,
   lensCorrect,
   projection,
+  zoomOut,
 }) =>
   encodeQueue.add(() => new Promise((resolve, reject) => Ffmpeg()
     .on('start', console.log)
@@ -93,11 +117,28 @@ const encode = async (sourceFileName, destFileName, {
     .inputOptions([
       `-vaapi_device ${VAAPI_DEVICE}`,
       '-hwaccel vaapi',
+      scale && '-hwaccel_output_format vaapi',
       start && `-ss ${start}`,
       duration && `-t ${duration}`,
       end && `-to ${end}`,
     ].filter(Boolean))
     .videoFilters([
+      scale && {
+        filter: 'scale_vaapi',
+        options: {
+          w: `iw*${scale / 100}`,
+          h: `ih*${scale / 100}`,
+        },
+      },
+      scale && {
+        filter: 'hwdownload',
+      },
+      scale && {
+        filter: 'format',
+        options: {
+          pix_fmts: 'nv12',
+        },
+      },
       stabilise && stabiliseFisheye && {
         filter: 'lensfun',
         options: {
@@ -155,6 +196,7 @@ const encode = async (sourceFileName, destFileName, {
           lens_model: 'fixed lens',
           mode: 'geometry',
           target_geometry: projection,
+          scale: zoomOut ? (1 - zoomOut / 100) : 1,
         },
       },
       rotate && {
@@ -165,8 +207,14 @@ const encode = async (sourceFileName, destFileName, {
           out_h: `roth(${rotate})`,
         },
       },
-      crop && {
-        filter: `crop=${crop}`,
+      (cropLeft || cropTop || cropWidth || cropHeight) && {
+        filter: `crop`,
+        options: {
+          x: `${cropLeft / 100}*iw`,
+          y: `${cropTop / 100}*ih`,
+          w: `${cropWidth / 100}*iw`,
+          h: `${cropHeight / 100}*ih`,
+        },
       },
       stabilise && {
         filter: 'format',
@@ -183,6 +231,12 @@ const encode = async (sourceFileName, destFileName, {
           chroma_msize_x: 5,
           chroma_msize_y: 5,
           chroma_amount: 0.4,
+        },
+      },
+      {
+        filter: 'format',
+        options: {
+          pix_fmts: 'nv12',
         },
       },
       {
@@ -207,6 +261,11 @@ export const render = async ({
     'analyse-only': analyseOnly,
     'stabilise-fisheye': stabiliseFisheye,
     'lens-correct': lensCorrect,
+    'zoom-out': zoomOut,
+    'crop-left': cropLeft,
+    'crop-top': cropTop,
+    'crop-width': cropWidth,
+    'crop-height': cropHeight,
     projection = 'fisheye_stereographic',
     stabilise,
     ...otherOptions
@@ -216,6 +275,12 @@ export const render = async ({
     stabilise,
     lensCorrect,
     projection,
+    zoomOut,
+    zoomOut,
+    cropLeft,
+    cropTop,
+    cropWidth,
+    cropHeight,
     ...otherOptions
   };
   console.log(optionsWithDefaults);

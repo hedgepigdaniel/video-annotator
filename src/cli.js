@@ -24,8 +24,13 @@ vorpal
   .option('-t, --duration <time>', 'The duration of the output')
   .option('-e, --end <time>', 'The end point in the source')
   .option('--rotate <angle>', 'Optional angle to rotate the source by')
-  .option('--crop <options>', 'Crop to apply (after rotation): "width:height:top:left"')
+  .option('--crop-left, -x <percent>', 'Horizontal start of the cropped area')
+  .option('--crop-top, -y <percent>', 'Vertical start of the cropped area')
+  .option('--crop-width, -w <percent>', 'Horizontal cropped dimension')
+  .option('--crop-height, -h <percent>', 'Vertical cropped dimension')
+  .option('--scale <percent>', 'Scale video before processing')
   .option('--stabilise', 'Apply stabilisation to remove camera shaking')
+  .option('--zoom-out, -z <percent>', 'Zoom out (and save regions streched out of the frame by lens correction)')
   .option(
     '--stabilise-fisheye',
     'Convert to the equidistant fisheye projection before doing stabilisation (marginally reduces warping)',
