@@ -21,22 +21,27 @@ vorpal
   .command('render <source> <dest>')
   .description('Extract part of a source video and write it to a file')
   .option('-s, --start <time>', 'The starting point in the source')
-  .option('-t, --duration <time>', 'The duration of the output')
+  .option('-d, --duration <time>', 'The duration of the output')
   .option('-e, --end <time>', 'The end point in the source')
   .option('--rotate <angle>', 'Optional angle to rotate the source by')
-  .option('--crop-left, -x <percent>', 'Horizontal start of the cropped area')
-  .option('--crop-top, -y <percent>', 'Vertical start of the cropped area')
-  .option('--crop-width, -w <percent>', 'Horizontal cropped dimension')
-  .option('--crop-height, -h <percent>', 'Vertical cropped dimension')
+  .option('--crop-left, -l <percent>', 'Cropped prportion from the left')
+  .option('--crop-top, -t <percent>', 'Cropped prportion from the top')
+  .option('--crop-right, -r <percent>', 'Cropped prportion from the right')
+  .option('--crop-bottom, -b <percent>', 'Cropped proportion from the bottom')
   .option('--scale <percent>', 'Scale video before processing')
   .option('--stabilise', 'Apply stabilisation to remove camera shaking')
+  .option('--pre-stabilise', 'Apply stabilisation to the entire input video')
   .option('--zoom-out, -z <percent>', 'Zoom out (and save regions streched out of the frame by lens correction)')
   .option(
     '--stabilise-fisheye',
     'Convert to the equidistant fisheye projection before doing stabilisation (marginally reduces warping)',
   )
   .option(
-    '-l, --lens-correct',
+    '--stabilise-buffer <percent>',
+    'Percentage to zoom out during stabilisation (so you can see where the camera shakes to)',
+  )
+  .option(
+    '-L, --lens-correct',
     'Correct lens distortion',
   )
   .option(

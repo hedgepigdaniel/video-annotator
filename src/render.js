@@ -24,6 +24,7 @@ const analyse = (sourceFileName, destFileName, {
   stabilise,
   stabiliseFisheye,
   scale,
+  preStabilise,
 }) =>
   analyseQueue.add(
     () => new Promise((resolve, reject) => Ffmpeg()
@@ -38,9 +39,9 @@ const analyse = (sourceFileName, destFileName, {
         `-vaapi_device ${VAAPI_DEVICE}`,
         '-hwaccel vaapi',
         scale && '-hwaccel_output_format vaapi',
-        start && `-ss ${start}`,
-        duration && `-t ${duration}`,
-        end && `-to ${end}`,
+        start && !preStabilise && `-ss ${start}`,
+        duration && !preStabilise && `-t ${duration}`,
+        end && !preStabilise && `-to ${end}`,
       ].filter(Boolean))
       .videoFilters([
         scale && {
@@ -78,7 +79,7 @@ const analyse = (sourceFileName, destFileName, {
         {
           filter: 'vidstabdetect',
           options: {
-            result: `${destFileName}.trf`,
+            result: `${preStabilise ? sourceFileName : destFileName}.trf`,
             shakiness: 10,
             mincontrast: 0.2,
             stepsize: 12,
@@ -97,10 +98,12 @@ const encode = async (sourceFileName, destFileName, {
   rotate,
   cropLeft,
   cropTop,
-  cropWidth,
-  cropHeight,
+  cropRight,
+  cropBottom,
   scale,
   stabilise,
+  stabiliseBuffer,
+  preStabilise,
   stabiliseFisheye,
   lensCorrect,
   projection,
@@ -118,9 +121,9 @@ const encode = async (sourceFileName, destFileName, {
       `-vaapi_device ${VAAPI_DEVICE}`,
       '-hwaccel vaapi',
       scale && '-hwaccel_output_format vaapi',
-      start && `-ss ${start}`,
-      duration && `-t ${duration}`,
-      end && `-to ${end}`,
+      start && !preStabilise && `-ss ${start}`,
+      duration && !preStabilise && `-t ${duration}`,
+      end && !preStabilise && `-to ${end}`,
     ].filter(Boolean))
     .videoFilters([
       scale && {
@@ -158,8 +161,9 @@ const encode = async (sourceFileName, destFileName, {
       stabilise && {
         filter: 'vidstabtransform',
         options: {
-          input: `${destFileName}.trf`,
+          input: `${preStabilise ? sourceFileName : destFileName}.trf`,
           optzoom: 0,
+          zoom: -stabiliseBuffer,
           interpol: 'bicubic',
           smoothing: 30,
           crop: 'black',
@@ -207,13 +211,13 @@ const encode = async (sourceFileName, destFileName, {
           out_h: `roth(${rotate})`,
         },
       },
-      (cropLeft || cropTop || cropWidth || cropHeight) && {
+      (cropLeft || cropTop || cropRight || cropBottom) && {
         filter: `crop`,
         options: {
           x: `${cropLeft / 100}*iw`,
           y: `${cropTop / 100}*ih`,
-          w: `${cropWidth / 100}*iw`,
-          h: `${cropHeight / 100}*ih`,
+          w: `${1 - (cropLeft + cropRight) / 100}*iw`,
+          h: `${1 - (cropTop + cropBottom) / 100}*ih`,
         },
       },
       stabilise && {
@@ -247,7 +251,10 @@ const encode = async (sourceFileName, destFileName, {
     .outputOptions([
       '-c:v hevc_vaapi',
       `-qp ${VAAPI_QP}`,
-    ])
+      start && preStabilise && `-ss ${start}`,
+      duration && preStabilise && `-t ${duration}`,
+      end && preStabilise && `-to ${end}`,
+    ].filter(Boolean))
     .run()));
 
 
@@ -260,18 +267,21 @@ export const render = async ({
     'encode-only': encodeOnly,
     'analyse-only': analyseOnly,
     'stabilise-fisheye': stabiliseFisheye,
+    'stabilise-buffer': stabiliseBuffer = 0,
     'lens-correct': lensCorrect,
     'zoom-out': zoomOut,
     'crop-left': cropLeft,
     'crop-top': cropTop,
-    'crop-width': cropWidth,
-    'crop-height': cropHeight,
+    'crop-right': cropRight,
+    'crop-bottom': cropBottom,
     projection = 'fisheye_stereographic',
     stabilise,
+    'pre-stabilise': preStabilise,
     ...otherOptions
   } = options;
   const optionsWithDefaults = {
     stabiliseFisheye,
+    stabiliseBuffer,
     stabilise,
     lensCorrect,
     projection,
@@ -279,8 +289,9 @@ export const render = async ({
     zoomOut,
     cropLeft,
     cropTop,
-    cropWidth,
-    cropHeight,
+    cropRight,
+    cropBottom,
+    preStabilise,
     ...otherOptions
   };
   console.log(optionsWithDefaults);
