@@ -239,8 +239,8 @@ function split() {
 		ITEMS+=( "$RECORDING $SET_START $SET_END $FILENAME" )
 	done;
 
-	# printf "%s\0" "${ITEMS[@]}" | xargs -0 -n 1 -P 2 $0 split-segment-detect
-	printf "%s\0" "${ITEMS[@]}" | xargs -0 -n 1 -P 4 $0 split-segment-transform
+	printf "%s\0" "${ITEMS[@]}" | xargs -0 -n 1 -P 2 $0 split-segment-detect
+	printf "%s\0" "${ITEMS[@]}" | xargs -0 -n 1 -P 3 $0 split-segment-transform
 
 	return
 }
