@@ -1,5 +1,6 @@
 import Ffmpeg from 'fluent-ffmpeg';
 import { promises as fs } from 'fs';
+import { resolve, dirname } from 'path';
 
 import { getMetadata } from './utils';
 
@@ -37,16 +38,16 @@ const findNumFrames = async (sourceSegments) => {
     .reduce((sum, frames) => sum + frames, 0);
 };
 
-export const join = async ({ code, options }) => {
+export const join = async ({ code, options: { output } }) => {
+  const outputFile = output || `${code}.mkv`;
   const sourceSegments = await findSourceSegments(code);
   console.log('Found source segments:\n', sourceSegments);
   const totalFrames = await findNumFrames(sourceSegments);
-  const concatFileName = `${code}.source.txt`;
+  const concatFileName = resolve(dirname(outputFile), `${code}.source.txt`);
   const concatFileContents = sourceSegments
-    .map((segment) => `file '${segment}'`)
+    .map((segment) => `file '${resolve(segment)}'`)
     .join('\n');
   await fs.writeFile(concatFileName, concatFileContents)
-  const outputFile = `${code}.mkv`;
   return new Promise((resolve, reject) => {
     Ffmpeg()
       .on('start', console.log)

@@ -5,7 +5,7 @@ import Vorpal from 'vorpal';
 const vorpal = Vorpal();
 
 import { join } from './join';
-import { render, analyse, encode } from './render';
+import { render } from './render';
 
 const callbackify = (action) => (args, callback) =>
   new Promise((resolve, reject) => action(args)
@@ -15,6 +15,7 @@ const callbackify = (action) => (args, callback) =>
 vorpal
   .command('join <code>')
   .description('Join the segments of a video together into a single file')
+  .option('--output, -o <output>', 'Path of resulting video')
   .action(callbackify(join));
 
 vorpal
@@ -29,6 +30,7 @@ vorpal
   .option('--crop-right, -r <percent>', 'Cropped prportion from the right')
   .option('--crop-bottom, -b <percent>', 'Cropped proportion from the bottom')
   .option('--scale <percent>', 'Scale video before processing')
+  .option('--resolution <resolution>', 'Optional height of output in pixels')
   .option('--stabilise', 'Apply stabilisation to remove camera shaking')
   .option('--pre-stabilise', 'Apply stabilisation to the entire input video')
   .option('--zoom-out, -z <percent>', 'Zoom out (and save regions streched out of the frame by lens correction)')

@@ -108,6 +108,7 @@ const encode = async (sourceFileName, destFileName, {
   lensCorrect,
   projection,
   zoomOut,
+  resolution,
 }) =>
   encodeQueue.add(() => new Promise((resolve, reject) => Ffmpeg()
     .on('start', console.log)
@@ -245,6 +246,13 @@ const encode = async (sourceFileName, destFileName, {
       },
       {
         filter: 'hwupload',
+      },
+      resolution && {
+        filter: 'scale_vaapi',
+        options: {
+          w: `iw*${resolution}/ih`,
+          h: `${resolution}`,
+        },
       },
     ].filter(Boolean))
     .output(destFileName)
