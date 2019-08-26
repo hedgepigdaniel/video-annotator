@@ -34,11 +34,11 @@ vorpal
   .option('--crop-top, -t <percent>', 'Cropped prportion from the top')
   .option('--crop-right, -r <percent>', 'Cropped prportion from the right')
   .option('--crop-bottom, -b <percent>', 'Cropped proportion from the bottom')
-  .option('--scale <percent>', 'Scale video before processing')
+  .option('--upsample <percent>', 'Scale video before processing')
   .option('--resolution <resolution>', 'Optional height of output in pixels')
   .option('--stabilise', 'Apply stabilisation to remove camera shaking')
   .option('--pre-stabilise', 'Apply stabilisation to the entire input video')
-  .option('--zoom-out, -z <percent>', 'Zoom out (and save regions streched out of the frame by lens correction)')
+  .option('--zoom, -z <percent>', 'Zoom (save regions streched out of the frame by lens correction, or zoom to the centre)')
   .option(
     '--stabilise-fisheye',
     'Convert to the equidistant fisheye projection before doing stabilisation (marginally reduces warping)',

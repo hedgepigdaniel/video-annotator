@@ -23,7 +23,7 @@ const analyse = (sourceFileName, destFileName, {
   end,
   stabilise,
   stabiliseFisheye,
-  scale,
+  upsample,
   preStabilise,
 }) =>
   analyseQueue.add(
@@ -38,23 +38,23 @@ const analyse = (sourceFileName, destFileName, {
       .inputOptions([
         `-vaapi_device ${VAAPI_DEVICE}`,
         '-hwaccel vaapi',
-        scale && '-hwaccel_output_format vaapi',
+        upsample && '-hwaccel_output_format vaapi',
         start && !preStabilise && `-ss ${start}`,
         duration && !preStabilise && `-t ${duration}`,
         end && !preStabilise && `-to ${end}`,
       ].filter(Boolean))
       .videoFilters([
-        scale && {
+        upsample && {
           filter: 'scale_vaapi',
           options: {
-            w: `iw*${scale / 100}`,
-            h: `ih*${scale / 100}`,
+            w: `iw*${upsample / 100}`,
+            h: `ih*${upsample / 100}`,
           },
         },
-        scale && {
+        upsample && {
           filter: 'hwdownload',
         },
-        scale && {
+        upsample && {
           filter: 'format',
           options: {
             pix_fmts: 'nv12',
@@ -100,14 +100,14 @@ const encode = async (sourceFileName, destFileName, {
   cropTop,
   cropRight,
   cropBottom,
-  scale,
+  upsample,
   stabilise,
   stabiliseBuffer,
   preStabilise,
   stabiliseFisheye,
   lensCorrect,
   projection,
-  zoomOut,
+  zoom,
   resolution,
 }) =>
   encodeQueue.add(() => new Promise((resolve, reject) => Ffmpeg()
@@ -121,23 +121,23 @@ const encode = async (sourceFileName, destFileName, {
     .inputOptions([
       `-vaapi_device ${VAAPI_DEVICE}`,
       '-hwaccel vaapi',
-      scale && '-hwaccel_output_format vaapi',
+      upsample && '-hwaccel_output_format vaapi',
       start && !preStabilise && `-ss ${start}`,
       duration && !preStabilise && `-t ${duration}`,
       end && !preStabilise && `-to ${end}`,
     ].filter(Boolean))
     .videoFilters([
-      scale && {
+      upsample && {
         filter: 'scale_vaapi',
         options: {
-          w: `iw*${scale / 100}`,
-          h: `ih*${scale / 100}`,
+          w: `iw*${upsample / 100}`,
+          h: `ih*${upsample / 100}`,
         },
       },
-      scale && {
+      upsample && {
         filter: 'hwdownload',
       },
-      scale && {
+      upsample && {
         filter: 'format',
         options: {
           pix_fmts: 'nv12',
@@ -201,7 +201,7 @@ const encode = async (sourceFileName, destFileName, {
           lens_model: 'fixed lens',
           mode: 'geometry',
           target_geometry: projection,
-          scale: zoomOut ? (1 - zoomOut / 100) : 1,
+          scale: zoom ? zoom / 100 : 1,
         },
       },
       rotate && {
@@ -277,7 +277,7 @@ export const render = async ({
     'stabilise-fisheye': stabiliseFisheye,
     'stabilise-buffer': stabiliseBuffer = 0,
     'lens-correct': lensCorrect,
-    'zoom-out': zoomOut,
+    'zoom': zoom,
     'crop-left': cropLeft,
     'crop-top': cropTop,
     'crop-right': cropRight,
@@ -293,8 +293,7 @@ export const render = async ({
     stabilise,
     lensCorrect,
     projection,
-    zoomOut,
-    zoomOut,
+    zoom,
     cropLeft,
     cropTop,
     cropRight,
