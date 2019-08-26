@@ -7,10 +7,15 @@ const vorpal = Vorpal();
 import { join } from './join';
 import { render } from './render';
 
-const callbackify = (action) => (args, callback) =>
-  new Promise((resolve, reject) => action(args)
-    .then(() => callback(null))
-    .catch(callback));
+const callbackify = (action) => async (args, callback) => {
+  try {
+    const result = await action(args);
+    callback(null, result);
+  } catch (e) {
+    console.error(e);
+    callback(null);
+  }
+};
 
 vorpal
   .command('join <code>')
