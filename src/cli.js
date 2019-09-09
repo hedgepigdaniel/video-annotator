@@ -1,5 +1,6 @@
 import 'source-map-support/register';
-import '@babel/polyfill';
+import "core-js/stable";
+import "regenerator-runtime/runtime";
 
 import commander from 'commander';
 
