@@ -21,7 +21,6 @@ const analyse = (sourceFileName, destFileName, {
   start,
   duration,
   end,
-  stabilise,
   stabiliseFisheye,
   upsample,
   preStabilise,
@@ -215,10 +214,10 @@ const encode = async (sourceFileName, destFileName, {
       (cropLeft || cropTop || cropRight || cropBottom) && {
         filter: `crop`,
         options: {
-          x: `${cropLeft / 100}*iw`,
-          y: `${cropTop / 100}*ih`,
-          w: `${1 - (cropLeft + cropRight) / 100}*iw`,
-          h: `${1 - (cropTop + cropBottom) / 100}*ih`,
+          x: `${(cropLeft || 0) / 100}*iw`,
+          y: `${(cropTop || 0) / 100}*ih`,
+          w: `${1 - ((cropLeft || 0) + (cropRight || 0)) / 100}*iw`,
+          h: `${1 - ((cropTop || 0) + (cropBottom || 0)) / 100}*ih`,
         },
       },
       stabilise && {
@@ -266,46 +265,13 @@ const encode = async (sourceFileName, destFileName, {
     .run()));
 
 
-export const render = async ({
-  source: sourceFileName,
-  dest: destFileName,
-  options,
-}) => {
-  const {
-    'encode-only': encodeOnly,
-    'analyse-only': analyseOnly,
-    'stabilise-fisheye': stabiliseFisheye,
-    'stabilise-buffer': stabiliseBuffer = 0,
-    'lens-correct': lensCorrect,
-    'zoom': zoom,
-    'crop-left': cropLeft,
-    'crop-top': cropTop,
-    'crop-right': cropRight,
-    'crop-bottom': cropBottom,
-    projection = 'fisheye_stereographic',
-    stabilise,
-    'pre-stabilise': preStabilise,
-    ...otherOptions
-  } = options;
-  const optionsWithDefaults = {
-    stabiliseFisheye,
-    stabiliseBuffer,
-    stabilise,
-    lensCorrect,
-    projection,
-    zoom,
-    cropLeft,
-    cropTop,
-    cropRight,
-    cropBottom,
-    preStabilise,
-    ...otherOptions
-  };
-  console.log(optionsWithDefaults);
+export const render = async (sourceFileName, destFileName, options) => {
+  console.log(options);
+  const { encodeOnly, analyseOnly, stabilise } = options;
   if (!encodeOnly && stabilise) {
-    await analyse(sourceFileName, destFileName, optionsWithDefaults)
+    await analyse(sourceFileName, destFileName, options)
   }
   if (!analyseOnly) {
-    await encode(sourceFileName, destFileName, optionsWithDefaults);
+    await encode(sourceFileName, destFileName, options);
   }
 };

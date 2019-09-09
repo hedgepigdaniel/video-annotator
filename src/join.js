@@ -38,7 +38,7 @@ const findNumFrames = async (sourceSegments) => {
     .reduce((sum, frames) => sum + frames, 0);
 };
 
-export const join = async ({ code, options: { output } }) => {
+export const join = async (code, { output }) => {
   const outputFile = output || `${code}.mkv`;
   const sourceSegments = await findSourceSegments(code);
   console.log('Found source segments:\n', sourceSegments);
