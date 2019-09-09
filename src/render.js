@@ -266,7 +266,6 @@ const encode = async (sourceFileName, destFileName, {
 
 
 export const render = async (sourceFileName, destFileName, options) => {
-  console.log(options);
   const { encodeOnly, analyseOnly, stabilise } = options;
   if (!encodeOnly && stabilise) {
     await analyse(sourceFileName, destFileName, options)

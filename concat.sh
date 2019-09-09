@@ -222,6 +222,7 @@ function split() {
 	read_global_state
 	echo_state
 	NUM_SETS=$SET
+	OPTIONS="$@"
 	ITEMS=()
 	for CURRENT_SET in $(seq 0 $(( $NUM_SETS - 1 ))); do
 		source "${RECORDING}.metadata.set$CURRENT_SET"
@@ -236,11 +237,15 @@ function split() {
 		fi
 		FILENAME="$MATCH_TYPE $MATCH_NUMBER - $OUR_TEAM vs $THEIR_TEAM - H$(( CURRENT_HALF + 1 ))S${SET}.mkv"
 		# optirun ffmpeg -y -ss "$SET_START" -to "$SET_END" -i "${RECORDING}.mkv" -c copy "$FILENAME"
-		ITEMS+=( "$RECORDING $SET_START $SET_END $FILENAME" )
+		ITEMS+=( "$RECORDING" )
+		ITEMS+=( "$SET_START" )
+		ITEMS+=( "$SET_END" )
+		ITEMS+=( "$FILENAME" )
+		ITEMS+=( "$OPTIONS" )
 	done;
 
-	printf "%s\0" "${ITEMS[@]}" | xargs -0 -n 1 -P 2 $0 split-segment-detect
-	printf "%s\0" "${ITEMS[@]}" | xargs -0 -n 1 -P 3 $0 split-segment-transform
+	printf "%s\0" "${ITEMS[@]}" | xargs -0 -n 5 -P 2 $0 split-segment-detect
+	printf "%s\0" "${ITEMS[@]}" | xargs -0 -n 5 -P 3 $0 split-segment-transform
 
 	return
 }
@@ -249,28 +254,32 @@ function split_segment_detect() {
 	RECORDING=$1
 	SEGMENT_START=$2
 	SEGMENT_END=$3
-	OUTPUT="${@:4}"
+	OUTPUT=$4
+	OPTIONS=${@:5}
 
 	echo "ANALYSING: \"$OUTPUT\""
 	echo "RECORDING: $RECORDING"
 	echo "START: $SEGMENT_START"
 	echo "END: $SEGMENT_END"
+	echo "OPTIONS: $OPTIONS"
 
-	node ../../video-annotator/dist/cli.js render "$RECORDING.mkv" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" --analyse-only
+	$(dirname $0)/dist/cli.js render "$RECORDING.mkv" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" --analyse-only $OPTIONS
 }
 
 function split_segment_transform() {
 	RECORDING=$1
 	SEGMENT_START=$2
 	SEGMENT_END=$3
-	OUTPUT="${@:4}"
+	OUTPUT=$4
+	OPTIONS=${@:5}
 
 	echo "ENCODING: \"$OUTPUT\""
 	echo "RECORDING: $RECORDING"
 	echo "START: $SEGMENT_START"
 	echo "END: $SEGMENT_END"
+	echo "OPTIONS: $OPTIONS"
 
-	node ../../video-annotator/dist/cli.js render "$RECORDING.mkv" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" --encode-only
+	$(dirname $0)/dist/cli.js render "$RECORDING.mkv" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" --encode-only $OPTIONS
 }
 
 function encode() {
@@ -382,13 +391,13 @@ case $1 in
 	;;
 "split")
 	RECORDING=$2
-	split
+	split ${@:3}
 	;;
 "split-segment-detect")
-	split_segment_detect ${@:2}
+	split_segment_detect "${@:2}"
 	;;
 "split-segment-transform")
-	split_segment_transform ${@:2}
+	split_segment_transform "${@:2}"
 	;;
 "reset")
 	RECORDING=$2
