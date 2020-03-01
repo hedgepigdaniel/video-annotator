@@ -5,6 +5,9 @@ import { getMetadata } from './utils';
 
 const VAAPI_DEVICE = '/dev/dri/renderD128';
 
+// Holy grail: ffmpeg -hwaccel vaapi -hwaccel_output_format vaapi -init_hw_device vaapi=intel:/dev/dri/renderD128 -init_hw_device opencl=ocl@intel -hwaccel_device intel -filter_hw_device ocl -i 1390.mkv -vf 'hwmap=derive_device=opencl,boxblur_opencl,hwmap=derive_device=vaapi:reverse=1' -c:v h264_vaapi ocl.mkv -y -v verbose
+// https://lists.cinelerra-gg.org/pipermail/cin/2019-May/000650.html
+
 /**
  * H.264:
  * 19 - "visually lossless"
@@ -21,12 +24,127 @@ const analyse = (sourceFileName, destFileName, {
   start,
   duration,
   end,
+  lensCorrect,
   stabiliseFisheye,
   upsample,
-  preStabilise,
+  zoom,
+  width,
+  height,
 }) =>
   analyseQueue.add(
-    () => new Promise((resolve, reject) => Ffmpeg()
+    () => new Promise(async (resolve, reject) => {
+      const metadata = await getMetadata(sourceFileName);
+      const { width: inputWidth, height: inputHeight } = metadata.streams.find(
+        (stream) => stream.codec_type === 'video',
+      );
+      return Ffmpeg()
+        .on('start', console.log)
+        .on('codecData', console.log)
+        .on('progress', ({ percent, currentFps }) =>
+          console.log(`${Math.floor(percent)}% (${currentFps}fps)`))
+        .on('error', reject)
+        .on('end', resolve)
+        .input(sourceFileName)
+        .inputOptions([
+          `-vaapi_device ${VAAPI_DEVICE}`,
+          '-hwaccel vaapi',
+          upsample && '-hwaccel_output_format vaapi',
+          start  && `-ss ${start}`,
+          duration && `-t ${duration}`,
+          end && `-to ${end}`,
+        ].filter(Boolean))
+        .videoFilters([
+          upsample && {
+            filter: 'scale_vaapi',
+            options: {
+              w: `iw*${upsample / 100}`,
+              h: `ih*${upsample / 100}`,
+            },
+          },
+          upsample && {
+            filter: 'hwdownload',
+          },
+          upsample && {
+            filter: 'format',
+            options: {
+              pix_fmts: 'nv12',
+            },
+          },
+          lensCorrect && {
+            filter: 'lenscorrection',
+            options: {
+              k1: -0.03012,
+            },
+          },
+          stabiliseFisheye && {
+            filter: 'v360',
+            options: {
+              // Input: GoPro HERO5 Black
+              input: 'sg',
+              // v360 has incorrect calculation of horizontal/vertical FOV from vertical FOV
+              ih_fov: 122.6,
+              iv_fov: 94.4,
+
+              // Output
+              output: 'fisheye',
+              d_fov: 149.2,
+              // Diagonal FOV preserves the entire input in stereographic => rectilinear
+              w: width || inputWidth * (upsample || 100) / 100,
+              h: height || inputHeight * (upsample || 100) / 100,
+              pitch: -90,
+
+            },
+          },
+          stabiliseFisheye && {
+            filter: 'format',
+            options: {
+              pix_fmts: 'nv12',
+            },
+          },
+          {
+            filter: 'vidstabdetect',
+            options: {
+              result: `${destFileName}.trf`,
+              shakiness: 10,
+              mincontrast: 0.2,
+              stepsize: 12,
+            },
+          },
+        ].filter(Boolean))
+        .format('null')
+        .output('-')
+        .run();
+      })
+  );
+
+const encode = async (sourceFileName, destFileName, {
+  start,
+  duration,
+  end,
+  roll,
+  pitch,
+  yaw,
+  width,
+  height,
+  upsample,
+  stabilise,
+  stabiliseFisheye,
+  stabiliseBuffer,
+  lensCorrect,
+  projection,
+  zoom,
+  resolution,
+}) =>
+  encodeQueue.add(() => new Promise(async (resolve, reject) => {
+    const metadata = await getMetadata(sourceFileName);
+    const { width: inputWidth, height: inputHeight } = metadata.streams.find(
+      (stream) => stream.codec_type === 'video',
+    );
+    const useV360 = (
+      (projection && projection !== (stabiliseFisheye ? 'fisheye' : 'sg'))
+      || roll || pitch || yaw
+    );
+    return Ffmpeg()
       .on('start', console.log)
       .on('codecData', console.log)
       .on('progress', ({ percent, currentFps }) =>
@@ -38,9 +156,9 @@ const analyse = (sourceFileName, destFileName, {
         `-vaapi_device ${VAAPI_DEVICE}`,
         '-hwaccel vaapi',
         upsample && '-hwaccel_output_format vaapi',
-        start && !preStabilise && `-ss ${start}`,
-        duration && !preStabilise && `-t ${duration}`,
-        end && !preStabilise && `-to ${end}`,
+        start && `-ss ${start}`,
+        duration && `-t ${duration}`,
+        end && `-to ${end}`,
       ].filter(Boolean))
       .videoFilters([
         upsample && {
@@ -48,6 +166,7 @@ const analyse = (sourceFileName, destFileName, {
           options: {
             w: `iw*${upsample / 100}`,
             h: `ih*${upsample / 100}`,
+            mode: 'hq',
           },
         },
         upsample && {
@@ -59,210 +178,97 @@ const analyse = (sourceFileName, destFileName, {
             pix_fmts: 'nv12',
           },
         },
-        stabiliseFisheye && {
-          filter: 'lensfun',
+        lensCorrect && {
+          filter: 'lenscorrection',
           options: {
-            make: 'GoPro',
-            model: 'HERO5 Black',
-            lens_model: 'fixed lens',
-            mode: 'geometry',
-            target_geometry: 'fisheye',
+            k1: -0.03012,
           },
         },
         stabiliseFisheye && {
+          filter: 'v360',
+          options: {
+            // Input: GoPro HERO5 Black
+            input: 'sg',
+            // v360 has incorrect calculation of horizontal/vertical FOV from vertical FOV
+            ih_fov: 122.6,
+            iv_fov: 94.4,
+
+            // Output
+            output: 'fisheye',
+            d_fov: 149.2,
+            // Diagonal FOV preserves the entire input in stereographic => rectilinear
+            w: width || inputWidth,
+            h: height || inputHeight,
+            pitch: -90,
+
+            interp: upsample ? 'linear' : 'lanc',
+          },
+        },
+        stabilise && {
+          filter: 'vidstabtransform',
+          options: {
+            input: `${destFileName}.trf`,
+            optzoom: 0,
+            zoom: -stabiliseBuffer,
+            interpol: 'bicubic',
+            smoothing: 30,
+            crop: 'black',
+          },
+        },
+        useV360 && {
+          filter: 'v360',
+          options: {
+            ...(stabiliseFisheye ? {
+              // Input: corrected fisheye projection
+              input: 'fisheye',
+              // This makes sense because the fisheye projection is linear
+              id_fov: 149.2 * (1 + (stabiliseBuffer || 0) / 100),
+            } : {
+              // Input: GoPro HERO5 Black
+              input: 'sg',
+              // v360 has incorrect calculation of horizontal/vertical FOV from vertical FOV
+              ih_fov: 122.6,
+              iv_fov: 94.4,
+            }),
+
+            // Output
+            output: projection,
+            // Diagonal FOV preserves the entire input in stereographic => rectilinear
+            d_fov: 149.2 * 100 / (100 + (zoom || 0)),
+            w: width || inputWidth * (upsample || 100) / 100,
+            h: height || inputHeight * (upsample || 100) / 100,
+
+            pitch: ((pitch || 0) - (stabiliseFisheye ? 0 : 90) + 180) % 360 - 180,
+            yaw: ((yaw || 0) + 180) % 360 - 180,
+            roll : ((roll || 0) + 180) % 360 - 180,
+
+            interp: 'lanc',
+          },
+        },
+        (stabilise || useV360) && {
           filter: 'format',
           options: {
             pix_fmts: 'nv12',
           },
         },
         {
-          filter: 'vidstabdetect',
+          filter: 'hwupload',
+        },
+        resolution && {
+          filter: 'scale_vaapi',
           options: {
-            result: `${preStabilise ? sourceFileName : destFileName}.trf`,
-            shakiness: 10,
-            mincontrast: 0.2,
-            stepsize: 12,
+            w: `iw*${resolution}/ih`,
+            h: `${resolution}`,
           },
         },
       ].filter(Boolean))
-      .format('null')
-      .output('-')
-      .run())
-  );
-
-const encode = async (sourceFileName, destFileName, {
-  start,
-  duration,
-  end,
-  rotate,
-  cropLeft,
-  cropTop,
-  cropRight,
-  cropBottom,
-  upsample,
-  stabilise,
-  stabiliseBuffer,
-  preStabilise,
-  stabiliseFisheye,
-  lensCorrect,
-  projection,
-  zoom,
-  resolution,
-}) =>
-  encodeQueue.add(() => new Promise((resolve, reject) => Ffmpeg()
-    .on('start', console.log)
-    .on('codecData', console.log)
-    .on('progress', ({ percent, currentFps }) =>
-      console.log(`${Math.floor(percent)}% (${currentFps}fps)`))
-    .on('error', reject)
-    .on('end', resolve)
-    .input(sourceFileName)
-    .inputOptions([
-      `-vaapi_device ${VAAPI_DEVICE}`,
-      '-hwaccel vaapi',
-      upsample && '-hwaccel_output_format vaapi',
-      start && !preStabilise && `-ss ${start}`,
-      duration && !preStabilise && `-t ${duration}`,
-      end && !preStabilise && `-to ${end}`,
-    ].filter(Boolean))
-    .videoFilters([
-      upsample && {
-        filter: 'scale_vaapi',
-        options: {
-          w: `iw*${upsample / 100}`,
-          h: `ih*${upsample / 100}`,
-        },
-      },
-      upsample && {
-        filter: 'hwdownload',
-      },
-      upsample && {
-        filter: 'format',
-        options: {
-          pix_fmts: 'nv12',
-        },
-      },
-      stabilise && stabiliseFisheye && {
-        filter: 'lensfun',
-        options: {
-          make: 'GoPro',
-          model: 'HERO5 Black',
-          lens_model: 'fixed lens',
-          mode: 'geometry',
-          target_geometry: 'fisheye',
-        },
-      },
-      stabilise && stabiliseFisheye && {
-        filter: 'format',
-        options: {
-          pix_fmts: 'nv12',
-        },
-      },
-      stabilise && {
-        filter: 'vidstabtransform',
-        options: {
-          input: `${preStabilise ? sourceFileName : destFileName}.trf`,
-          optzoom: 0,
-          zoom: -stabiliseBuffer,
-          interpol: 'bicubic',
-          smoothing: 30,
-          crop: 'black',
-        },
-      },
-      stabilise && stabiliseFisheye && projection !== 'fisheye' && {
-        filter: 'format',
-        options: {
-          pix_fmts: 'nv12',
-        },
-      },
-      stabilise && stabiliseFisheye && projection !== 'fisheye' && {
-        filter: 'lensfun',
-        options: {
-          make: 'GoPro',
-          model: 'HERO5 Black',
-          lens_model: 'fixed lens',
-          mode: 'geometry',
-          target_geometry: 'fisheye',
-          reverse: 1,
-        },
-      },
-      lensCorrect && projection && ((stabilise && !stabiliseFisheye) || projection !== 'fisheye') && {
-        filter: 'format',
-        options: {
-          pix_fmts: 'nv12',
-        },
-      },
-      lensCorrect && projection && ((stabilise && !stabiliseFisheye) || projection !== 'fisheye') && {
-        filter: 'lensfun',
-        options: {
-          make: 'GoPro',
-          model: 'HERO5 Black',
-          lens_model: 'fixed lens',
-          mode: 'geometry',
-          target_geometry: projection,
-          scale: zoom ? zoom / 100 : 1,
-        },
-      },
-      rotate && {
-        filter: 'rotate',
-        options: {
-          angle: rotate,
-          out_w: `rotw(${rotate})`,
-          out_h: `roth(${rotate})`,
-        },
-      },
-      (cropLeft || cropTop || cropRight || cropBottom) && {
-        filter: `crop`,
-        options: {
-          x: `${(cropLeft || 0) / 100}*iw`,
-          y: `${(cropTop || 0) / 100}*ih`,
-          w: `${1 - ((cropLeft || 0) + (cropRight || 0)) / 100}*iw`,
-          h: `${1 - ((cropTop || 0) + (cropBottom || 0)) / 100}*ih`,
-        },
-      },
-      stabilise && {
-        filter: 'format',
-        options: {
-          pix_fmts: 'nv12',
-        },
-      },
-      stabilise && {
-        filter: 'unsharp',
-        options: {
-          luma_msize_x: 5,
-          luma_msize_y: 5,
-          luma_amount: 0.8,
-          chroma_msize_x: 5,
-          chroma_msize_y: 5,
-          chroma_amount: 0.4,
-        },
-      },
-      {
-        filter: 'format',
-        options: {
-          pix_fmts: 'nv12',
-        },
-      },
-      {
-        filter: 'hwupload',
-      },
-      resolution && {
-        filter: 'scale_vaapi',
-        options: {
-          w: `iw*${resolution}/ih`,
-          h: `${resolution}`,
-        },
-      },
-    ].filter(Boolean))
-    .output(destFileName)
-    .outputOptions([
-      '-c:v hevc_vaapi',
-      `-qp ${VAAPI_QP}`,
-      start && preStabilise && `-ss ${start}`,
-      duration && preStabilise && `-t ${duration}`,
-      end && preStabilise && `-to ${end}`,
-    ].filter(Boolean))
-    .run()));
+      .output(destFileName)
+      .outputOptions([
+        '-c:v hevc_vaapi',
+        `-qp ${VAAPI_QP}`,
+      ].filter(Boolean))
+      .run();
+    }));
 
 
 export const render = async (sourceFileName, destFileName, options) => {

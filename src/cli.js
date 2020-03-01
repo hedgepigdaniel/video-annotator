@@ -31,16 +31,14 @@ commander
   .option('-s, --start <time>', 'The starting point in the source')
   .option('-d, --duration <time>', 'The duration of the output')
   .option('-e, --end <time>', 'The end point in the source')
-  .option('--rotate <angle>', 'Optional angle to rotate the source by')
-  .option('-l, --crop-left <percent>', 'Cropped prportion from the left', parseNumber)
-  .option('-t, --crop-top <percent>', 'Cropped prportion from the top', parseNumber)
-  .option('-r, --crop-right <percent>', 'Cropped prportion from the right', parseNumber)
-  .option('-b, --crop-bottom <percent>', 'Cropped proportion from the bottom', parseNumber)
-  .option('--upsample <percent>', 'Scale video before processing', parseNumber)
-  .option('--resolution <resolution>', 'Optional height of output in pixels', parseNumber)
+  .option('-w, --width <pixels>', 'Output width (pixels)', parseNumber)
+  .option('-h, --height <pixels>', 'Output height (pixels)', parseNumber)
+  .option('-r, --roll <angle>', 'Turn camera clockwise by <degrees>', parseNumber)
+  .option('-p, --pitch <degrees>', 'Turn camera up by <degrees>', parseNumber)
+  .option('-y, --yaw <degrees>', 'Turn camera left by <degrees>', parseNumber)
+  .option('-z, --zoom <percent>', 'Zoom camera by <percent>', parseNumber)
+  .option('-u, --upsample <percent>', 'Scale video before processing', parseNumber)
   .option('--stabilise', 'Apply stabilisation to remove camera shaking')
-  .option('--pre-stabilise', 'Apply stabilisation to the entire input video')
-  .option('-z, --zoom <percent>', 'Zoom (save regions streched out of the frame by lens correction, or zoom to the centre)', parseNumber)
   .option(
     '--stabilise-fisheye',
     'Convert to the equidistant fisheye projection before doing stabilisation (marginally reduces warping)',
@@ -52,13 +50,13 @@ commander
     0,
   )
   .option(
-    '-L, --lens-correct',
-    'Correct lens distortion',
+    '-l, --lens-correct',
+    'Correct lens distortion (from closest well known projection)',
   )
   .option(
-    '-p, --projection <projection>',
-    'Use the specified lens projection (default fisheye_stereographic). See lensfun docs for options.',
-    'fisheye_stereographic',
+    '--projection <projection>',
+    'Use the specified lens projection (default rectilinear). See v360 filter docs for options.',
+    'rectilinear',
   )
   .option(
     '-c, --encode-only',
