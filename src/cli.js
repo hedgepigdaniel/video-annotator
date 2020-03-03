@@ -38,6 +38,7 @@ commander
   .option('-y, --yaw <degrees>', 'Turn camera left by <degrees>', parseNumber)
   .option('-z, --zoom <percent>', 'Zoom camera by <percent>', parseNumber)
   .option('-u, --upsample <percent>', 'Scale video before processing', parseNumber)
+  .option('--crop <crop>', 'Crop video (options for ffmpeg crop filter)')
   .option('--stabilise', 'Apply stabilisation to remove camera shaking')
   .option(
     '--stabilise-fisheye',

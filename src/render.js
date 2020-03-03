@@ -26,7 +26,6 @@ const analyse = (sourceFileName, destFileName, {
   lensCorrect,
   stabiliseFisheye,
   upsample,
-  zoom,
   width,
   height,
   vaapiDevice,
@@ -133,6 +132,7 @@ const encode = async (sourceFileName, destFileName, {
   lensCorrect,
   projection,
   zoom,
+  crop,
   resolution,
   vaapiDevice,
 }) =>
@@ -252,6 +252,7 @@ const encode = async (sourceFileName, destFileName, {
             pix_fmts: 'nv12',
           },
         },
+        crop && `crop=${crop}`,
         {
           filter: 'hwupload',
         },
