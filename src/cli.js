@@ -66,6 +66,7 @@ commander
     '-a, --analyse-only',
     'Skip encode stage, generate stabilisation data only',
   )
+  .option('--vaapi-device <device>', 'VAAPI device render node', '/dev/dri/renderD128')
   .action(wrapError(render));
 
 commander.parse(process.argv);

@@ -3,7 +3,6 @@ import Queue from 'promise-queue';
 
 import { getMetadata } from './utils';
 
-const VAAPI_DEVICE = '/dev/dri/renderD128';
 
 // Holy grail: ffmpeg -hwaccel vaapi -hwaccel_output_format vaapi -init_hw_device vaapi=intel:/dev/dri/renderD128 -init_hw_device opencl=ocl@intel -hwaccel_device intel -filter_hw_device ocl -i 1390.mkv -vf 'hwmap=derive_device=opencl,boxblur_opencl,hwmap=derive_device=vaapi:reverse=1' -c:v h264_vaapi ocl.mkv -y -v verbose
 // https://lists.cinelerra-gg.org/pipermail/cin/2019-May/000650.html
@@ -30,6 +29,7 @@ const analyse = (sourceFileName, destFileName, {
   zoom,
   width,
   height,
+  vaapiDevice,
 }) =>
   analyseQueue.add(
     () => new Promise(async (resolve, reject) => {
@@ -46,7 +46,7 @@ const analyse = (sourceFileName, destFileName, {
         .on('end', resolve)
         .input(sourceFileName)
         .inputOptions([
-          `-vaapi_device ${VAAPI_DEVICE}`,
+          `-vaapi_device ${vaapiDevice}`,
           '-hwaccel vaapi',
           upsample && '-hwaccel_output_format vaapi',
           start  && `-ss ${start}`,
@@ -134,6 +134,7 @@ const encode = async (sourceFileName, destFileName, {
   projection,
   zoom,
   resolution,
+  vaapiDevice,
 }) =>
   encodeQueue.add(() => new Promise(async (resolve, reject) => {
     const metadata = await getMetadata(sourceFileName);
@@ -153,7 +154,7 @@ const encode = async (sourceFileName, destFileName, {
       .on('end', resolve)
       .input(sourceFileName)
       .inputOptions([
-        `-vaapi_device ${VAAPI_DEVICE}`,
+        `-vaapi_device ${vaapiDevice}`,
         '-hwaccel vaapi',
         upsample && '-hwaccel_output_format vaapi',
         start && `-ss ${start}`,
