@@ -47,7 +47,6 @@ const analyse = (sourceFileName, destFileName, {
         .inputOptions([
           `-vaapi_device ${vaapiDevice}`,
           '-hwaccel vaapi',
-          upsample && '-hwaccel_output_format vaapi',
           start  && `-ss ${start}`,
           duration && `-t ${duration}`,
           end && `-to ${end}`,
@@ -145,6 +144,7 @@ const encode = async (sourceFileName, destFileName, {
       (projection && projection !== (stabiliseFisheye ? 'fisheye' : 'sg'))
       || roll || pitch || yaw
     );
+    const download = useV360 || lensCorrect || stabilise;
     return Ffmpeg()
       .on('start', console.log)
       .on('codecData', console.log)
@@ -156,7 +156,7 @@ const encode = async (sourceFileName, destFileName, {
       .inputOptions([
         `-vaapi_device ${vaapiDevice}`,
         '-hwaccel vaapi',
-        upsample && '-hwaccel_output_format vaapi',
+        '-hwaccel_output_format vaapi',
         start && `-ss ${start}`,
         duration && `-t ${duration}`,
         end && `-to ${end}`,
@@ -170,10 +170,10 @@ const encode = async (sourceFileName, destFileName, {
             mode: 'hq',
           },
         },
-        upsample && {
+        download && {
           filter: 'hwdownload',
         },
-        upsample && {
+        download && {
           filter: 'format',
           options: {
             pix_fmts: 'nv12',
@@ -252,16 +252,16 @@ const encode = async (sourceFileName, destFileName, {
             pix_fmts: 'nv12',
           },
         },
-        crop && `crop=${crop}`,
-        {
+        download && {
           filter: 'hwupload',
         },
-        resolution && {
+        crop && `crop=${crop}`,
+        (resolution || crop) && {
           filter: 'scale_vaapi',
-          options: {
+          options: resolution ? {
             w: `iw*${resolution}/ih`,
             h: `${resolution}`,
-          },
+          } : {},
         },
       ].filter(Boolean))
       .output(destFileName)
