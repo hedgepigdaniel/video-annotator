@@ -267,6 +267,7 @@ const encode = async (sourceFileName, destFileName, {
             h: `${resolution}`,
           } : {},
         },
+        'hwmap'
       ].filter(Boolean))
       .output(destFileName)
       .outputOptions([
