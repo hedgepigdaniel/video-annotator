@@ -9,7 +9,7 @@ function read_source_files() {
 	fi
 
 	LISTING="./${RECORDING}.list"
-	OUTPUT="./${RECORDING}.mkv"
+	OUTPUT="./${RECORDING}.mp4"
 
 	if [ -f "$LISTING" ]; then
 		echo "Listing file already exists"
@@ -212,7 +212,7 @@ function stabilise_file_transform() {
 	FILE=${1#file \'}
 	FILE=${FILE%\'}
 	TRANSFORMS="${FILE}.trf"
-	TEMP="$FILE.tmp.mkv"
+	TEMP="$FILE.tmp.mp4"
 	ffmpeg -y -vaapi_device /dev/dri/renderD128 -hwaccel vaapi -i "$FILE" -vf "vidstabtransform=input=$TRANSFORMS,rotate='PI/5:ow=hypot(iw,ih):oh=ow',crop=1800:1600:300:800,unsharp=5:5:0.8:3:3:0.4,format=nv12,hwupload" -c:a copy -c:v h264_vaapi -qp 17 -f matroska "$TEMP"
 	rm -rf "$FILE"
 	mv "$TEMP" "$FILE"
@@ -236,8 +236,8 @@ function split() {
 			source "${RECORDING}.metadata.set$(( CURRENT_SET + 1 ))"
 			SET_END=$START_TIME
 		fi
-		FILENAME="$MATCH_TYPE $MATCH_NUMBER - $OUR_TEAM vs $THEIR_TEAM - H$(( CURRENT_HALF + 1 ))S${SET}.mkv"
-		# optirun ffmpeg -y -ss "$SET_START" -to "$SET_END" -i "${RECORDING}.mkv" -c copy "$FILENAME"
+		FILENAME="$MATCH_TYPE $MATCH_NUMBER - $OUR_TEAM vs $THEIR_TEAM - H$(( CURRENT_HALF + 1 ))S${SET}.mp4"
+		# optirun ffmpeg -y -ss "$SET_START" -to "$SET_END" -i "${RECORDING}.mp4" -c copy "$FILENAME"
 		ITEMS+=( "$RECORDING" )
 		ITEMS+=( "$SET_START" )
 		ITEMS+=( "$SET_END" )
@@ -272,7 +272,7 @@ function split_segment() {
 	echo "END: $SEGMENT_END"
 	echo "OPTIONS: $OPTIONS"
 
-	$(dirname $0)/dist/cli.js render "$RECORDING.mkv" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" $OPTIONS
+	$(dirname $0)/dist/cli.js render "$RECORDING.mp4" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" $OPTIONS
 }
 
 function encode() {
@@ -320,7 +320,7 @@ function encode() {
 				CMD="$CMD -b:v $BITRATE"
 			fi
 
-			CMD="$CMD ${ARG%.*}-encoded.mkv"
+			CMD="$CMD ${ARG%.*}-encoded.mp4"
 
 			$CMD
 		fi
