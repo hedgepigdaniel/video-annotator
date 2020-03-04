@@ -149,7 +149,7 @@ const encode = async (sourceFileName, destFileName, {
       )
     );
     const isVaapiEncoder = encoder.indexOf('vaapi') != -1;
-    const isAmfEncoder = encoder.indexOf('vaapi') != -1;
+    const isAmfEncoder = encoder.indexOf('amf') != -1;
     const scaleFilter = isVaapiEncoder ? 'scale_vaapi' : 'scale';
     const download = vaapiDevice && (useV360 || lensCorrect || stabilise);
     return Ffmpeg()
