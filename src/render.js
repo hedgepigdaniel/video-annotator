@@ -271,7 +271,7 @@ const encode = async (sourceFileName, destFileName, {
             h: `${resolution}`,
           } : {},
         },
-        isAmfEncoder && 'hwmap',
+        isAmfEncoder && vaapiDevice && !download && 'hwmap',
       ].filter(Boolean))
       .output(destFileName)
       .outputOptions([
