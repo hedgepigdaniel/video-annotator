@@ -148,7 +148,10 @@ const encode = async (sourceFileName, destFileName, {
         roll || pitch || yaw
       )
     );
-    const download = useV360 || lensCorrect || stabilise;
+    const isVaapiEncoder = encoder.indexOf('vaapi') != -1;
+    const isAmfEncoder = encoder.indexOf('vaapi') != -1;
+    const scaleFilter = isVaapiEncoder ? 'scale_vaapi' : 'scale';
+    const download = vaapiDevice && (useV360 || lensCorrect || stabilise);
     return Ffmpeg()
       .on('start', console.log)
       .on('codecData', console.log)
@@ -159,15 +162,15 @@ const encode = async (sourceFileName, destFileName, {
       .input(sourceFileName)
       .inputOptions([
         `-vaapi_device ${vaapiDevice}`,
-        '-hwaccel vaapi',
-        '-hwaccel_output_format vaapi',
+        vaapiDevice && '-hwaccel vaapi',
+        vaapiDevice && '-hwaccel_output_format vaapi',
         start && `-ss ${start}`,
         duration && `-t ${duration}`,
         end && `-to ${end}`,
       ].filter(Boolean))
       .videoFilters([
         upsample && {
-          filter: 'scale_vaapi',
+          filter: scaleFilter,
           options: {
             w: `iw*${upsample / 100}`,
             h: `ih*${upsample / 100}`,
@@ -256,18 +259,18 @@ const encode = async (sourceFileName, destFileName, {
             pix_fmts: 'nv12',
           },
         },
-        download && {
+        (!vaapiDevice || download) && isVaapiEncoder && {
           filter: 'hwupload',
         },
         crop && `crop=${crop}`,
         (resolution || crop) && {
-          filter: 'scale_vaapi',
+          filter: scaleFilter,
           options: resolution ? {
             w: `iw*${resolution}/ih`,
             h: `${resolution}`,
           } : {},
         },
-        'hwmap'
+        isAmfEncoder && 'hwmap',
       ].filter(Boolean))
       .output(destFileName)
       .outputOptions([
