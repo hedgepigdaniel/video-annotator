@@ -150,7 +150,6 @@ const encode = async (sourceFileName, destFileName, {
     );
     const isVaapiEncoder = encoder.indexOf('vaapi') != -1;
     const isAmfEncoder = encoder.indexOf('amf') != -1;
-    const scaleFilter = isVaapiEncoder ? 'scale_vaapi' : 'scale';
     const download = vaapiDevice && (useV360 || lensCorrect || stabilise);
     return Ffmpeg()
       .on('start', console.log)
@@ -170,7 +169,7 @@ const encode = async (sourceFileName, destFileName, {
       ].filter(Boolean))
       .videoFilters([
         upsample && {
-          filter: scaleFilter,
+          filter: vaapiDevice ? 'scale_vaapi' : 'scale',
           options: {
             w: `iw*${upsample / 100}`,
             h: `ih*${upsample / 100}`,
@@ -264,7 +263,9 @@ const encode = async (sourceFileName, destFileName, {
         },
         crop && `crop=${crop}`,
         (resolution || crop) && {
-          filter: scaleFilter,
+          filter: (isVaapiEncoder || (isAmfEncoder && vaapiDevice && !download))
+            ? 'scale_vaapi'
+            : 'scale',
           options: resolution ? {
             w: `iw*${resolution}/ih`,
             h: `${resolution}`,
