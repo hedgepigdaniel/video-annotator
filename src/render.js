@@ -45,25 +45,25 @@ const analyse = (sourceFileName, destFileName, {
         .on('end', resolve)
         .input(sourceFileName)
         .inputOptions([
-          `-vaapi_device ${vaapiDevice}`,
-          '-hwaccel vaapi',
-          '-hwaccel_output_format vaapi',
+          vaapiDevice && `-vaapi_device ${vaapiDevice}`,
+          vaapiDevice && '-hwaccel vaapi',
+          vaapiDevice && '-hwaccel_output_format vaapi',
           start  && `-ss ${start}`,
           duration && `-t ${duration}`,
           end && `-to ${end}`,
         ].filter(Boolean))
         .videoFilters([
           upsample && {
-            filter: 'scale_vaapi',
+            filter: vaapiDevice ? 'scale_vaapi' : 'scale',
             options: {
               w: `iw*${upsample / 100}`,
               h: `ih*${upsample / 100}`,
             },
           },
-          {
+          vaapiDevice && {
             filter: 'hwdownload',
           },
-          upsample && {
+          {
             filter: 'format',
             options: {
               pix_fmts: 'nv12',
@@ -160,7 +160,7 @@ const encode = async (sourceFileName, destFileName, {
       .on('end', resolve)
       .input(sourceFileName)
       .inputOptions([
-        `-vaapi_device ${vaapiDevice}`,
+        vaapiDevice && `-vaapi_device ${vaapiDevice}`,
         vaapiDevice && '-hwaccel vaapi',
         vaapiDevice && '-hwaccel_output_format vaapi',
         start && `-ss ${start}`,
