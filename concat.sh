@@ -9,7 +9,7 @@ function read_source_files() {
 	fi
 
 	LISTING="./${RECORDING}.list"
-	OUTPUT="./${RECORDING}.mp4"
+	OUTPUT="./${RECORDING}.mkv"
 
 	if [ -f "$LISTING" ]; then
 		echo "Listing file already exists"
@@ -272,7 +272,7 @@ function split_segment() {
 	echo "END: $SEGMENT_END"
 	echo "OPTIONS: $OPTIONS"
 
-	$(dirname $0)/dist/cli.js render "$RECORDING.mp4" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" $OPTIONS
+	$(dirname $0)/dist/cli.js render "$RECORDING.mkv" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" $OPTIONS
 }
 
 function encode() {
