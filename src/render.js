@@ -162,7 +162,7 @@ const encode = async (sourceFileName, destFileName, {
       .inputOptions([
         vaapiDevice && `-vaapi_device ${vaapiDevice}`,
         vaapiDevice && '-hwaccel vaapi',
-        vaapiDevice && '-hwaccel_output_format vaapi',
+        vaapiDevice && (download || isVaapiEncoder) && '-hwaccel_output_format vaapi',
         start && `-ss ${start}`,
         duration && `-t ${duration}`,
         end && `-to ${end}`,
