@@ -222,7 +222,8 @@ function split() {
 	read_global_state
 	echo_state
 	NUM_SETS=$SET
-	OPTIONS="$@"
+	CONCURRENCY=$1
+	OPTIONS="${@:2}"
 	ITEMS=()
 	for CURRENT_SET in $(seq 0 $(( $NUM_SETS - 1 ))); do
 		source "${RECORDING}.metadata.set$CURRENT_SET"
@@ -244,18 +245,26 @@ function split() {
 		ITEMS+=( "$OPTIONS" )
 	done;
 
-	printf "%s\0" "${ITEMS[@]}" | xargs -0 -n 5 -P 2 $0 split-segment-detect
-	printf "%s\0" "${ITEMS[@]}" | xargs -0 -n 5 -P 3 $0 split-segment-transform
+	printf "%s\0" "${ITEMS[@]}" | xargs -0 -n 5 -P $CONCURRENCY $0 split-segment
 
 	return
 }
 
-function split_segment_detect() {
+function split_segment() {
 	RECORDING=$1
 	SEGMENT_START=$2
 	SEGMENT_END=$3
 	OUTPUT=$4
 	OPTIONS=${@:5}
+
+	LOCKFILE="$OUTPUT".lock
+
+	if { set -C; 2>/dev/null > "$LOCKFILE"; }; then
+    	trap 'rm -f "$LOCKFILE"' EXIT
+	else
+		echo "$OUTPUT is already claimed by another worker"
+		exit
+	fi
 
 	echo "ANALYSING: \"$OUTPUT\""
 	echo "RECORDING: $RECORDING"
@@ -263,23 +272,7 @@ function split_segment_detect() {
 	echo "END: $SEGMENT_END"
 	echo "OPTIONS: $OPTIONS"
 
-	$(dirname $0)/dist/cli.js render "$RECORDING.mkv" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" --analyse-only $OPTIONS
-}
-
-function split_segment_transform() {
-	RECORDING=$1
-	SEGMENT_START=$2
-	SEGMENT_END=$3
-	OUTPUT=$4
-	OPTIONS=${@:5}
-
-	echo "ENCODING: \"$OUTPUT\""
-	echo "RECORDING: $RECORDING"
-	echo "START: $SEGMENT_START"
-	echo "END: $SEGMENT_END"
-	echo "OPTIONS: $OPTIONS"
-
-	$(dirname $0)/dist/cli.js render "$RECORDING.mkv" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" --encode-only $OPTIONS
+	$(dirname $0)/dist/cli.js render "$RECORDING.mkv" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" $OPTIONS
 }
 
 function encode() {
@@ -349,7 +342,7 @@ Usage:
 		Join the segments of the video <code> together
 	$0 tag <code>
 		Interactively specify markers in the joined video
-	$0 split <code>
+	$0 split <code> <concurrency> [...options]
 		Split the match into a separate video for each set
 	$0 reset <code>
 		Reset data about sets, times, etc
@@ -393,11 +386,8 @@ case $1 in
 	RECORDING=$2
 	split ${@:3}
 	;;
-"split-segment-detect")
-	split_segment_detect "${@:2}"
-	;;
-"split-segment-transform")
-	split_segment_transform "${@:2}"
+"split-segment")
+	split_segment "${@:2}"
 	;;
 "reset")
 	RECORDING=$2
