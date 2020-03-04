@@ -68,6 +68,7 @@ commander
     'Skip encode stage, generate stabilisation data only',
   )
   .option('--vaapi-device <device>', 'VAAPI device render node', '/dev/dri/renderD128')
+  .option('--encoder <encoder>', 'The encoder used for the output video', 'h264_vaapi')
   .action(wrapError(render));
 
 commander.parse(process.argv);

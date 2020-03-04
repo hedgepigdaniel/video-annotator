@@ -47,6 +47,7 @@ const analyse = (sourceFileName, destFileName, {
         .inputOptions([
           `-vaapi_device ${vaapiDevice}`,
           '-hwaccel vaapi',
+          '-hwaccel_output_format vaapi',
           start  && `-ss ${start}`,
           duration && `-t ${duration}`,
           end && `-to ${end}`,
@@ -59,7 +60,7 @@ const analyse = (sourceFileName, destFileName, {
               h: `ih*${upsample / 100}`,
             },
           },
-          upsample && {
+          {
             filter: 'hwdownload',
           },
           upsample && {
@@ -134,6 +135,7 @@ const encode = async (sourceFileName, destFileName, {
   crop,
   resolution,
   vaapiDevice,
+  encoder,
 }) =>
   encodeQueue.add(() => new Promise(async (resolve, reject) => {
     const metadata = await getMetadata(sourceFileName);
@@ -266,7 +268,7 @@ const encode = async (sourceFileName, destFileName, {
       ].filter(Boolean))
       .output(destFileName)
       .outputOptions([
-        '-c:v hevc_vaapi',
+        `-c:v ${encoder}`,
         `-qp ${VAAPI_QP}`,
       ].filter(Boolean))
       .run();
