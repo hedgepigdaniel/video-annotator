@@ -143,8 +143,10 @@ const encode = async (sourceFileName, destFileName, {
       (stream) => stream.codec_type === 'video',
     );
     const useV360 = (
-      (projection && projection !== (stabiliseFisheye ? 'fisheye' : 'sg'))
-      || roll || pitch || yaw
+      projection && (
+        projection !== (stabiliseFisheye ? 'fisheye' : 'sg') ||
+        roll || pitch || yaw
+      )
     );
     const download = useV360 || lensCorrect || stabilise;
     return Ffmpeg()

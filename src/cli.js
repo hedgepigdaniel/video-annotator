@@ -57,7 +57,6 @@ commander
   .option(
     '--projection <projection>',
     'Use the specified lens projection (default rectilinear). See v360 filter docs for options.',
-    'rectilinear',
   )
   .option(
     '-c, --encode-only',
