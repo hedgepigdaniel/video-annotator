@@ -26,6 +26,13 @@ using namespace std::chrono;
 
 #define DRM_DEVICE_PATH "/dev/dri/renderD128"
 
+#define ERR_STRING_BUF_SIZE 50
+char err_string[ERR_STRING_BUF_SIZE];
+
+char* errString(int errnum) {
+    return av_make_error_string(err_string, ERR_STRING_BUF_SIZE, errnum);
+}
+
 void printOpenClInfo(void) {
     ocl::Context context;
     if (!context.create(ocl::Device::TYPE_ALL))
@@ -66,12 +73,24 @@ void initOpenClFromVaapi () {
 }
 
 typedef struct _IoContext {
-    char *filename = NULL;
-    AVBufferRef *hw_device_ctx = NULL;
-    AVFormatContext *format_ctx = NULL;
-    int video_stream = -1;
-    AVCodecContext *decoder_ctx = NULL;
+    char *filename;
+    AVBufferRef *vaapi_device_ctx;
+    AVBufferRef *ocl_device_ctx;
+    AVFormatContext *format_ctx;
+    int video_stream;
+    AVCodecContext *decoder_ctx;
 } IoContext;
+
+IoContext * ioContext_alloc() {
+    IoContext *ctx = (IoContext *) malloc(sizeof (IoContext));
+    ctx->filename = NULL;
+    ctx->vaapi_device_ctx = NULL;
+    ctx->ocl_device_ctx = NULL;
+    ctx->format_ctx = NULL;
+    ctx->video_stream = -1;
+    ctx->decoder_ctx = NULL;
+    return ctx;
+}
 
 static enum AVPixelFormat get_vaapi_format(
     AVCodecContext *ctx,
@@ -133,7 +152,7 @@ int open_input_file (IoContext *ctx) {
         );
         return ret;
     }
-    ctx->decoder_ctx->hw_device_ctx = av_buffer_ref(ctx->hw_device_ctx);
+    ctx->decoder_ctx->hw_device_ctx = av_buffer_ref(ctx->vaapi_device_ctx);
     if (!ctx->decoder_ctx->hw_device_ctx) {
         fprintf(stderr, "A hardware device reference create failed.\n");
         return AVERROR(ENOMEM);
@@ -154,7 +173,7 @@ int open_input_file (IoContext *ctx) {
 void close_input_file(IoContext *ctx) {
     avformat_close_input(&ctx->format_ctx);
     avcodec_free_context(&ctx->decoder_ctx);
-    av_buffer_unref(&ctx->hw_device_ctx);
+    av_buffer_unref(&ctx->vaapi_device_ctx);
 }
 
 enum ReadState {
@@ -165,6 +184,40 @@ enum ReadState {
     AWAITING_INPUT_FRAMES,
 };
 
+int process_frame(IoContext *ioContext, AVFrame *frame) {
+    int ret = 0;
+    AVFrame *ocl_frame = av_frame_alloc();
+    AVBufferRef *ocl_hw_frames_ctx = NULL;
+    if (ocl_frame == NULL) {
+        return AVERROR(ENOMEM);
+    }
+    ret = av_hwframe_ctx_create_derived(
+        &ocl_hw_frames_ctx,
+        AV_PIX_FMT_OPENCL,
+        ioContext->ocl_device_ctx,
+        frame->hw_frames_ctx,
+        AV_HWFRAME_MAP_DIRECT
+    );
+    if (ret) {
+        fprintf(
+            stderr,
+            "Failed to map hwframes context to OpenCL: %s\n",
+            errString(ret)
+        );
+        return ret;
+    }
+    ocl_frame->hw_frames_ctx = av_buffer_ref(ocl_hw_frames_ctx);
+    if (ocl_frame->hw_frames_ctx == NULL) {
+        return AVERROR(ENOMEM);
+    }
+    ret = av_hwframe_map(ocl_frame, frame, AV_HWFRAME_MAP_DIRECT);
+    if (ret) {
+        fprintf(stderr, "Failed to map hardware frames: %s\n", errString(ret));
+    }
+    av_frame_unref(ocl_frame);
+    return ret;
+}
+
 int main (int argc, char* argv[])
 {
     if (argc < 2) {
@@ -172,12 +225,12 @@ int main (int argc, char* argv[])
         return 1;
     }
     int ret = 0;
-    IoContext ioContext;
+    IoContext *ioContext = ioContext_alloc();
     AVPacket packet;
-    ioContext.filename = argv[1];
+    ioContext->filename = argv[1];
 
     ret = av_hwdevice_ctx_create(
-        &ioContext.hw_device_ctx,
+        &ioContext->vaapi_device_ctx,
         AV_HWDEVICE_TYPE_VAAPI,
         NULL,
         NULL,
@@ -188,7 +241,22 @@ int main (int argc, char* argv[])
         return ret;
     }
 
-    ret = open_input_file (&ioContext);
+    ret = av_hwdevice_ctx_create_derived(
+        &ioContext->ocl_device_ctx,
+        AV_HWDEVICE_TYPE_OPENCL,
+        ioContext->vaapi_device_ctx,
+        0
+    );
+    if (ret < 0) {
+        fprintf(
+            stderr,
+            "Failed to map VAAPI device to OpenCL device. Error code: %s\n",
+            errString(ret)
+        );
+        return ret;
+    }
+
+    ret = open_input_file (ioContext);
     if (ret) {
         cout << "Failed to open input file\n";
         return ret;
@@ -213,20 +281,20 @@ int main (int argc, char* argv[])
                 break;
             }
             case AWAITING_INPUT_PACKETS: {
-                ret = av_read_frame(ioContext.format_ctx, &packet);
+                ret = av_read_frame(ioContext->format_ctx, &packet);
                 if (ret < 0) {
                     state = INPUT_ENDED;
                     break;
                 }
 
-                // AVStream *stream = ioContext.format_ctx->streams[packet.stream_index];
-                if (packet.stream_index == ioContext.video_stream) {
+                // AVStream *stream = ioContext->format_ctx->streams[packet.stream_index];
+                if (packet.stream_index == ioContext->video_stream) {
                     // fprintf(
                     //     stderr,
                     //     "Read video packet at %lf seconds\n",
                     //     1.0 * packet.pts * stream->time_base.num / stream->time_base.den
                     // );
-                    ret = avcodec_send_packet(ioContext.decoder_ctx, &packet);
+                    ret = avcodec_send_packet(ioContext->decoder_ctx, &packet);
                     if (ret) {
                         state = ERROR;
                         break;
@@ -244,8 +312,15 @@ int main (int argc, char* argv[])
             }
             case AWAITING_INPUT_FRAMES: {
                 frame = av_frame_alloc();
-                ret = avcodec_receive_frame(ioContext.decoder_ctx, frame);
+                ret = avcodec_receive_frame(ioContext->decoder_ctx, frame);
                 if (!ret) {
+                    ret = process_frame(ioContext, frame);
+                    if (ret) {
+                        fprintf(stderr, "Failed to process frame\n");
+                        state = ERROR;
+                        break;
+                    }
+
                     // success
                     n_decoded_frames++;
                     frames_in_interval++;
@@ -278,6 +353,6 @@ int main (int argc, char* argv[])
         }
     }
 
-    close_input_file(&ioContext);
+    close_input_file(ioContext);
     return 0;
 }
