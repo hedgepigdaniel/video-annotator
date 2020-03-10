@@ -17,11 +17,15 @@ include_directories(['.'])
 display_image_sources = ['DisplayImage.cpp']
 
 libavformat = dependency('libavformat')
+libavcodec = dependency('libavcodec')
+libavutil = dependency('libavutil')
 opencv = dependency('opencv4')
 libva_drm = dependency('libva-drm')
 
 dependencies = [
     libavformat,
+    libavcodec,
+    libavutil,
     opencv,
     libva_drm,
 ]
