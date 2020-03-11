@@ -20,6 +20,7 @@ libavformat = dependency('libavformat')
 libavcodec = dependency('libavcodec')
 libavutil = dependency('libavutil')
 opencv = dependency('opencv4')
+opencl = dependency('OpenCL')
 libva_drm = dependency('libva-drm')
 
 dependencies = [
@@ -27,6 +28,7 @@ dependencies = [
     libavcodec,
     libavutil,
     opencv,
+    opencl,
     libva_drm,
 ]
 
