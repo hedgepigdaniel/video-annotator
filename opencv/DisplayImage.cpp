@@ -10,6 +10,7 @@ extern "C" {
     #include <libavcodec/avcodec.h>
     #include <libavutil/buffer.h>
     #include <libavutil/hwcontext_opencl.h>
+    #include <libavutil/hwcontext_vaapi.h>
     #include <libavutil/pixdesc.h>
     #include <va/va_drm.h>
 }
@@ -77,7 +78,6 @@ void initOpenClFromVaapi () {
 typedef struct _IoContext {
     char *filename;
     AVBufferRef *vaapi_device_ctx;
-    AVBufferRef *ocl_device_ctx;
     AVFormatContext *format_ctx;
     int video_stream;
     AVCodecContext *decoder_ctx;
@@ -87,7 +87,6 @@ IoContext * ioContext_alloc() {
     IoContext *ctx = (IoContext *) malloc(sizeof (IoContext));
     ctx->filename = NULL;
     ctx->vaapi_device_ctx = NULL;
-    ctx->ocl_device_ctx = NULL;
     ctx->format_ctx = NULL;
     ctx->video_stream = -1;
     ctx->decoder_ctx = NULL;
@@ -188,146 +187,39 @@ enum ReadState {
 
 int process_frame(IoContext *ioContext, AVFrame *frame) {
     int ret = 0;
-    AVFrame *ocl_frame = av_frame_alloc();
-    AVBufferRef *ocl_hw_frames_ctx = NULL;
-    if (ocl_frame == NULL) {
-        return AVERROR(ENOMEM);
-    }
-    ret = av_hwframe_ctx_create_derived(
-        &ocl_hw_frames_ctx,
-        AV_PIX_FMT_OPENCL,
-        ioContext->ocl_device_ctx,
-        frame->hw_frames_ctx,
-        AV_HWFRAME_MAP_DIRECT
+    AVHWFramesContext *hw_frames_ctx;
+    AVVAAPIFramesContext *vaapi_frames_ctx;
+    AVVAAPIDeviceContext *vaapi_device_vaapi_ctx;
+    VADisplay display_id;
+    hw_frames_ctx = (AVHWFramesContext *) frame->hw_frames_ctx->data;
+    vaapi_frames_ctx = (AVVAAPIFramesContext *) hw_frames_ctx->hwctx;
+    vaapi_device_vaapi_ctx = (AVVAAPIDeviceContext *) hw_frames_ctx->device_ctx->hwctx;
+    display_id = vaapi_device_vaapi_ctx->display;
+    int pool_surface = *((int *) &frame->buf[0]->data);
+    VASurfaceID surface_id = vaapi_frames_ctx->surface_ids[pool_surface];
+
+
+    UMat mat;
+    va_intel::convertFromVASurface(
+        display_id,
+        surface_id,
+        Size(frame->width, frame->height),
+        mat
     );
-    if (ret) {
-        fprintf(
-            stderr,
-            "Failed to map hwframes context to OpenCL: %s\n",
-            errString(ret)
-        );
-        return ret;
-    }
-    ocl_frame->hw_frames_ctx = av_buffer_ref(ocl_hw_frames_ctx);
-    if (ocl_frame->hw_frames_ctx == NULL) {
-        return AVERROR(ENOMEM);
-    }
-    ret = av_hwframe_map(ocl_frame, frame, AV_HWFRAME_MAP_DIRECT);
-    if (ret) {
-        fprintf(stderr, "Failed to map hardware frames: %s\n", errString(ret));
-    }
+    // imshow("slow", mat);
+    // waitKey(1);
 
-    fprintf(stderr, "frame format: %s\n", av_get_pix_fmt_name((AVPixelFormat) frame->format));
-    fprintf(stderr, "ocl_frame format: %s\n", av_get_pix_fmt_name((AVPixelFormat) ocl_frame->format));
-    fprintf(stderr, "stack: %p\n", &ret);
-    fprintf(stderr, "data: %p %p %p\n", ocl_frame->data[0], ocl_frame->data[1], ocl_frame->data[2]);
-
-    UMat frame_mat;
-    cl_mem luma = (cl_mem) ocl_frame->data[0];
-    // cl_mem chroma = (cl_mem) ocl_frame->data[1];
-    ocl::convertFromImage(luma, frame_mat);
-
-    av_frame_unref(ocl_frame);
     return ret;
 }
 
-int init_opencv_opencl_from_hwctx(AVBufferRef *ocl_device_ctx) {
-    int ret = 0;
-    AVHWDeviceContext *ocl_hw_device_ctx;
-    AVOpenCLDeviceContext *ocl_device_ocl_ctx;
-    ocl_hw_device_ctx = (AVHWDeviceContext *) ocl_device_ctx->data;
-    ocl_device_ocl_ctx = (AVOpenCLDeviceContext *) ocl_hw_device_ctx->hwctx;
-    cl_context_properties *props = NULL;
-    cl_platform_id platform = NULL;
-    char *platform_name = NULL;
-    size_t param_value_size = 0;
-    ret = clGetContextInfo(
-        ocl_device_ocl_ctx->context,
-        CL_CONTEXT_PROPERTIES,
-        0,
-        NULL,
-        &param_value_size
-    );
-    if (ret != CL_SUCCESS) {
-        std::cerr << "clGetContextInfo failed to get props size\n";
-        return ret;
-    }
-    if (param_value_size == 0) {
-        std::cerr << "clGetContextInfo returned size 0\n";
-        return 1;
-    }
-    props = (cl_context_properties *) malloc(param_value_size);
-    if (props == NULL) {
-        std::cerr << "Failed to alloc props 0\n";
-        return AVERROR(ENOMEM);
-    }
-    ret = clGetContextInfo(
-        ocl_device_ocl_ctx->context,
-        CL_CONTEXT_PROPERTIES,
-        param_value_size,
-        props,
-        NULL
-    );
-    if (ret != CL_SUCCESS) {
-        std::cerr << "clGetContextInfo failed\n";
-        return ret;
-    }
-    for (int i = 0; props[i] != 0; i = i + 2) {
-        if (props[i] == CL_CONTEXT_PLATFORM) {
-            platform = (cl_platform_id) props[i + 1];
-        }
-    }
-    if (platform == NULL) {
-        std::cerr << "Failed to find platform in cl context props\n";
-        return 1;
-    }
-
-    ret = clGetPlatformInfo(
-        platform,
-        CL_PLATFORM_NAME,
-        0,
-        NULL,
-        &param_value_size
-    );
-
-    if (ret != CL_SUCCESS) {
-        std::cerr << "clGetPlatformInfo failed to get platform name size\n";
-        return ret;
-    }
-    if (param_value_size == 0) {
-        std::cerr << "clGetPlatformInfo returned 0 size for name\n";
-        return 1;
-    }
-    platform_name = (char *) malloc(param_value_size);
-    if (platform_name == NULL) {
-        std::cerr << "Failed to malloc platform_name\n";
-        return AVERROR(ENOMEM);
-    }
-    ret = clGetPlatformInfo(
-        platform,
-        CL_PLATFORM_NAME,
-        param_value_size,
-        platform_name,
-        NULL
-    );
-    if (ret != CL_SUCCESS) {
-        std::cerr << "clGetPlatformInfo failed\n";
-        return ret;
-    }
-
-    std::cerr << "Initialising OpenCV OpenCL context with platform \"" <<
-        platform_name <<
-        "\"\n";
-
-    ocl::Context::getDefault(false);
-    ocl::attachContext(
-        platform_name,
-        platform,
-        ocl_device_ocl_ctx->context,
-        ocl_device_ocl_ctx->device_id
-    );
+int init_opencv_opencl_from_vaapi_hwctx(AVBufferRef *vaapi_device_ctx) {
+    AVHWDeviceContext *vaapi_hw_device_ctx;
+    AVVAAPIDeviceContext *vaapi_device_vaapi_ctx;
+    vaapi_hw_device_ctx = (AVHWDeviceContext *) vaapi_device_ctx->data;
+    vaapi_device_vaapi_ctx = (AVVAAPIDeviceContext *) vaapi_hw_device_ctx->hwctx;
+    va_intel::ocl::initializeContextFromVA (vaapi_device_vaapi_ctx->display, true);
     return 0;
-}
+}Z
 
 int main (int argc, char* argv[])
 {
@@ -352,22 +244,7 @@ int main (int argc, char* argv[])
         return ret;
     }
 
-    ret = av_hwdevice_ctx_create_derived(
-        &ioContext->ocl_device_ctx,
-        AV_HWDEVICE_TYPE_OPENCL,
-        ioContext->vaapi_device_ctx,
-        0
-    );
-    if (ret < 0) {
-        fprintf(
-            stderr,
-            "Failed to map VAAPI device to OpenCL device. Error code: %s\n",
-            errString(ret)
-        );
-        return ret;
-    }
-
-    ret = init_opencv_opencl_from_hwctx(ioContext->ocl_device_ctx);
+    ret = init_opencv_opencl_from_vaapi_hwctx(ioContext->vaapi_device_ctx);
     if (ret) {
         std::cerr << "Failed to initialise OpenCV OpenCL from libavcodec hw ctx\n";
         return ret;
