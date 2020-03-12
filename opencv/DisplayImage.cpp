@@ -209,23 +209,27 @@ int process_frame(IoContext *ioContext, AVFrame *frame) {
         return ret;
     }
     ocl_frame->hw_frames_ctx = av_buffer_ref(ocl_hw_frames_ctx);
+    ocl_frame->format = AV_PIX_FMT_OPENCL;
     if (ocl_frame->hw_frames_ctx == NULL) {
         return AVERROR(ENOMEM);
     }
-    ret = av_hwframe_map(ocl_frame, frame, AV_HWFRAME_MAP_DIRECT);
+    ret = av_hwframe_map(ocl_frame, frame, AV_HWFRAME_MAP_READ);
     if (ret) {
         fprintf(stderr, "Failed to map hardware frames: %s\n", errString(ret));
     }
 
-    fprintf(stderr, "frame format: %s\n", av_get_pix_fmt_name((AVPixelFormat) frame->format));
-    fprintf(stderr, "ocl_frame format: %s\n", av_get_pix_fmt_name((AVPixelFormat) ocl_frame->format));
-    fprintf(stderr, "stack: %p\n", &ret);
-    fprintf(stderr, "data: %p %p %p\n", ocl_frame->data[0], ocl_frame->data[1], ocl_frame->data[2]);
+    // fprintf(stderr, "frame format: %s\n", av_get_pix_fmt_name((AVPixelFormat) frame->format));
+    // fprintf(stderr, "ocl_frame format: %s\n", av_get_pix_fmt_name((AVPixelFormat) ocl_frame->format));
+    // fprintf(stderr, "stack: %p\n", &ret);
+    // fprintf(stderr, "data: %p %p %p\n", ocl_frame->data[0], ocl_frame->data[1], ocl_frame->data[2]);
 
-    UMat frame_mat;
-    cl_mem luma = (cl_mem) ocl_frame->data[0];
-    // cl_mem chroma = (cl_mem) ocl_frame->data[1];
-    ocl::convertFromImage(luma, frame_mat);
+    UMat chroma, luma;
+    cl_mem luma_image = (cl_mem) ocl_frame->data[0];
+    // cl_mem chroma_image = (cl_mem) ocl_frame->data[1];
+    ocl::convertFromImage(luma_image, luma);
+    // ocl::convertFromImage(chroma_image, chroma);
+    // imshow("fast", luma);
+    // waitKey(1);
 
     av_frame_unref(ocl_frame);
     return ret;
