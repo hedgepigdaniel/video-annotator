@@ -186,6 +186,92 @@ enum ReadState {
     AWAITING_INPUT_FRAMES,
 };
 
+/*
+// Convert OpenCL image2d_t memory to UMat
+*/
+int convert_ocl_images_to_nv12_umat(cl_mem cl_luma, cl_mem cl_chroma, UMat& dst)
+{
+    int ret = 0;
+
+    cl_image_format luma_fmt = { 0, 0 };
+    cl_image_format chroma_fmt = { 0, 0 };
+    ret = clGetImageInfo(cl_luma, CL_IMAGE_FORMAT, sizeof(cl_image_format), &luma_fmt, 0);
+    if (ret) {
+        std::cerr << "Failed to get luma image format: " << ret << "\n";
+        return ret;
+    }
+    ret = clGetImageInfo(cl_chroma, CL_IMAGE_FORMAT, sizeof(cl_image_format), &chroma_fmt, 0);
+    if (ret) {
+        std::cerr << "Failed to get chroma image format: " << ret << "\n";
+        return ret;
+    }
+    if (luma_fmt.image_channel_data_type != CL_UNORM_INT8 ||
+    chroma_fmt.image_channel_data_type != CL_UNORM_INT8) {
+        std::cerr << "Wrong image format\n";
+        return 1;
+    }
+    if (luma_fmt.image_channel_order != CL_R ||
+    chroma_fmt.image_channel_order != CL_RG) {
+        std::cerr << "Wrong image channel order\n";
+        return 1;
+    }
+
+    size_t luma_w = 0;
+    size_t luma_h = 0;
+    size_t chroma_w = 0;
+    size_t chroma_h = 0;
+
+    ret |= clGetImageInfo(cl_luma, CL_IMAGE_WIDTH, sizeof(size_t), &luma_w, 0);
+    ret |= clGetImageInfo(cl_luma, CL_IMAGE_HEIGHT, sizeof(size_t), &luma_h, 0);
+    ret |= clGetImageInfo(cl_chroma, CL_IMAGE_WIDTH, sizeof(size_t), &chroma_w, 0);
+    ret |= clGetImageInfo(cl_chroma, CL_IMAGE_HEIGHT, sizeof(size_t), &chroma_h, 0);
+    if (ret) {
+        std::cerr << "Failed to get image info: " << ret << "\n";
+        return ret;
+    }
+
+    if (luma_w != 2 * chroma_w || luma_h != 2 *chroma_h ) {
+        std::cerr << "Mismatched image dimensions\n";
+        return 1;
+    }
+
+    dst.create(luma_h + chroma_h, luma_w, CV_8U);
+    cl_mem dst_buffer = (cl_mem) dst.handle(ACCESS_READ);
+    cl_command_queue queue = (cl_command_queue) ocl::Queue::getDefault().ptr();
+    size_t src_origin[3] = { 0, 0, 0 };
+    size_t luma_region[3] = { luma_w, luma_h, 1 };
+    size_t chroma_region[3] = { chroma_w, chroma_h * 2, 1 };
+    ret = clEnqueueCopyImageToBuffer(
+        queue,
+        cl_luma,
+        dst_buffer,
+        src_origin,
+        luma_region,
+        0,
+        0,
+        NULL,
+        NULL
+    );
+    ret |= clEnqueueCopyImageToBuffer(
+        queue,
+        cl_chroma,
+        dst_buffer,
+        src_origin,
+        chroma_region,
+        luma_w * luma_h * 1,
+        0,
+        NULL,
+        NULL
+    );
+    ret |= clFinish(queue);
+    if (ret) {
+        std::cerr << "Failed to enqueue image copy to buffer\n";
+        return ret;
+    }
+
+    return ret;
+}
+
 int process_frame(IoContext *ioContext, AVFrame *frame) {
     int ret = 0;
     AVFrame *ocl_frame = av_frame_alloc();
@@ -223,12 +309,19 @@ int process_frame(IoContext *ioContext, AVFrame *frame) {
     // fprintf(stderr, "stack: %p\n", &ret);
     // fprintf(stderr, "data: %p %p %p\n", ocl_frame->data[0], ocl_frame->data[1], ocl_frame->data[2]);
 
-    UMat chroma, luma;
-    cl_mem luma_image = (cl_mem) ocl_frame->data[0];
-    // cl_mem chroma_image = (cl_mem) ocl_frame->data[1];
-    ocl::convertFromImage(luma_image, luma);
-    // ocl::convertFromImage(chroma_image, chroma);
-    // imshow("fast", luma);
+    UMat frame_mat;
+    UMat frame_bgr;
+    ret = convert_ocl_images_to_nv12_umat(
+        (cl_mem) ocl_frame->data[0],
+        (cl_mem) ocl_frame->data[1],
+        frame_mat
+    );
+    cvtColor(frame_mat, frame_bgr, COLOR_YUV2BGR_NV12);
+    if (ret) {
+        std::cerr << "Failed to convert OpenCL images to opencv\n";
+        return ret;
+    }
+    // imshow("fast", frame_bgr);
     // waitKey(1);
 
     av_frame_unref(ocl_frame);
