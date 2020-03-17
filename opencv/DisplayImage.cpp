@@ -21,12 +21,15 @@ extern "C" {
 #include <fcntl.h>
 #include <unistd.h>
 #include <chrono>
+#include <math.h>
 
 using namespace std;
 using namespace cv;
 using namespace std::chrono;
 
 #define DRM_DEVICE_PATH "/dev/dri/renderD128"
+
+#define PI 3.14159265
 
 #define ERR_STRING_BUF_SIZE 50
 char err_string[ERR_STRING_BUF_SIZE];
@@ -74,6 +77,11 @@ void initOpenClFromVaapi () {
     printOpenClInfo();
 }
 
+typedef struct _FramesContext {
+    UMat map_x;
+    UMat map_y;
+} FramesContext;
+
 typedef struct _IoContext {
     char *filename;
     AVBufferRef *vaapi_device_ctx;
@@ -81,6 +89,7 @@ typedef struct _IoContext {
     AVFormatContext *format_ctx;
     int video_stream;
     AVCodecContext *decoder_ctx;
+    FramesContext frames_ctx;
 } IoContext;
 
 IoContext * ioContext_alloc() {
@@ -91,6 +100,8 @@ IoContext * ioContext_alloc() {
     ctx->format_ctx = NULL;
     ctx->video_stream = -1;
     ctx->decoder_ctx = NULL;
+    ctx->frames_ctx.map_x = UMat();
+    ctx->frames_ctx.map_y = UMat();
     return ctx;
 }
 
@@ -272,6 +283,69 @@ int convert_ocl_images_to_nv12_umat(cl_mem cl_luma, cl_mem cl_chroma, UMat& dst)
     return ret;
 }
 
+int process_frame_mat(FramesContext frames_ctx, UMat frame) {
+    UMat frame_bgr, frame_undistorted;
+    cvtColor(frame, frame_bgr, COLOR_YUV2BGR_NV12);
+    remap(
+        frame_bgr,
+        frame_undistorted,
+        frames_ctx.map_x,
+        frames_ctx.map_y,
+        INTER_LINEAR
+    );
+    imshow("fast", frame_undistorted);
+    waitKey(1);
+    return 0;
+}
+
+int init_remap_state (IoContext *ioContext) {
+    int height = ioContext->decoder_ctx->height;
+    int width = ioContext->decoder_ctx->width;
+
+    // Known field of view of the camera
+    // int v_fov_s = 94.4 * PI / 180;
+    // int h_fov_s = 122.6 * PI / 180;
+    int d_fov = 149.2 * PI / 180;
+
+    // Center coordinates
+    float center_x = width / 2;
+    float center_y = height / 2;
+
+    // // Maximum input horizontal/vertical radius
+    // double max_radius_x_s = tan(v_fov_s / 2.f);
+    // double max_radius_y_s = tan(h_fov_s / 2.f);
+
+    // Maximum input and output diagonal radius
+    double max_radius_d = tan(d_fov / 2.f);
+    double max_radius_d_pixels = sqrt(center_x * center_x + center_y * center_y);
+
+    Mat map_x(height, width, CV_32FC1);
+    Mat map_y(height, width, CV_32FC1);
+    for(int y = 0; y < map_x.rows; y++) {
+        for(int x = 0; x < map_x.cols; x++ ) {
+            // We start from the rectilinear (output) coordinates
+            int rel_x_r = x - center_x;
+            int rel_y_r = y - center_y;
+            float radius_r = sqrt(rel_x_r * rel_x_r + rel_y_r * rel_y_r) * max_radius_d / max_radius_d_pixels;
+
+            // We find the real angle of the light source from the center
+            float theta = atan(radius_r * max_radius_d);
+
+            // Convert theta to the appropriate radius for stereographic projection
+            float radius_s = 2 * tan(theta / 2);
+
+            float scale = radius_s / radius_r;
+            map_x.at<float>(y, x) = center_x + rel_x_r * scale;
+            map_y.at<float>(y, x) = center_y + rel_y_r * scale;
+        }
+    }
+    UMat map_1, map_2;
+    convertMaps(map_x, map_y, map_1, map_2, CV_16SC2);
+    ioContext->frames_ctx.map_x = map_1;
+    ioContext->frames_ctx.map_y = map_2;
+    return 0;
+}
+
 int process_frame(IoContext *ioContext, AVFrame *frame) {
     int ret = 0;
     AVFrame *ocl_frame = av_frame_alloc();
@@ -310,19 +384,20 @@ int process_frame(IoContext *ioContext, AVFrame *frame) {
     // fprintf(stderr, "data: %p %p %p\n", ocl_frame->data[0], ocl_frame->data[1], ocl_frame->data[2]);
 
     UMat frame_mat;
-    UMat frame_bgr;
     ret = convert_ocl_images_to_nv12_umat(
         (cl_mem) ocl_frame->data[0],
         (cl_mem) ocl_frame->data[1],
         frame_mat
     );
-    cvtColor(frame_mat, frame_bgr, COLOR_YUV2BGR_NV12);
     if (ret) {
         std::cerr << "Failed to convert OpenCL images to opencv\n";
         return ret;
     }
-    // imshow("fast", frame_bgr);
-    // waitKey(1);
+    ret = process_frame_mat(ioContext->frames_ctx, frame_mat);
+    if (ret) {
+        std::cerr << "Failed to process frame matrix\n";
+        return ret;
+    }
 
     av_frame_unref(ocl_frame);
     return ret;
@@ -473,6 +548,12 @@ int main (int argc, char* argv[])
     ret = open_input_file (ioContext);
     if (ret) {
         cout << "Failed to open input file\n";
+        return ret;
+    }
+
+    ret = init_remap_state (ioContext);
+    if (ret) {
+        cout << "Failed to initialize remapping state\n";
         return ret;
     }
 
