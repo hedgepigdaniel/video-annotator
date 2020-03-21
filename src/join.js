@@ -39,7 +39,7 @@ const findNumFrames = async (sourceSegments) => {
 };
 
 export const join = async (code, { output }) => {
-  const outputFile = output || `${code}.mkv`;
+  const outputFile = output || `${code}.mp4`;
   const sourceSegments = await findSourceSegments(code);
   console.log('Found source segments:\n', sourceSegments);
   const totalFrames = await findNumFrames(sourceSegments);
@@ -48,6 +48,10 @@ export const join = async (code, { output }) => {
     .map((segment) => `file '${resolve(segment)}'`)
     .join('\n');
   await fs.writeFile(concatFileName, concatFileContents)
+  const { streams } = await getMetadata(sourceSegments[0]);
+  const gpmdStreamIndex = streams.findIndex(
+    (stream) => (stream.tags || {}).handler_name === '\tGoPro MET',
+  );
   return new Promise((resolve, reject) => {
     Ffmpeg()
       .on('start', console.log)
@@ -59,7 +63,12 @@ export const join = async (code, { output }) => {
       .input(concatFileName)
       .inputOptions(['-f concat', '-safe 0'])
       .output(outputFile)
-      .outputOptions(['-c copy'])
+      .outputOptions([
+        '-c copy',
+        '-map 0:v',
+        '-map 0:a',
+        gpmdStreamIndex !== -1 && `-map 0:${gpmdStreamIndex}`,
+      ].filter(Boolean))
       .run();
   });
 };
