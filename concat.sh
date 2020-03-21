@@ -263,6 +263,7 @@ function split_segment() {
 	if { set -C; 2>/dev/null > "$LOCKFILE"; }; then
 		if [ -e "$COMPLETEFILE" ]; then
 			echo "$OUTPUT has already been created"
+			rm -f "$LOCKFILE"
 			exit
 		fi
     	trap 'rm -f "$LOCKFILE"' EXIT
