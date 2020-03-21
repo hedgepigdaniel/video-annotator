@@ -93,6 +93,7 @@ typedef struct _IoContext {
     AVBufferRef *ocl_device_ctx;
     AVFormatContext *format_ctx;
     int video_stream;
+    int gpmf_stream;
     AVCodecContext *decoder_ctx;
     FramesContext frames_ctx;
 } IoContext;
@@ -104,6 +105,7 @@ IoContext * ioContext_alloc() {
     ctx->ocl_device_ctx = NULL;
     ctx->format_ctx = NULL;
     ctx->video_stream = -1;
+    ctx->gpmf_stream = -1;
     ctx->decoder_ctx = NULL;
     ctx->frames_ctx.map_x = UMat();
     ctx->frames_ctx.map_y = UMat();
@@ -124,6 +126,19 @@ static enum AVPixelFormat get_vaapi_format(
     }
     fprintf(stderr, "Unable to decode this file using VA-API.\n");
     return AV_PIX_FMT_NONE;
+}
+
+int get_gpmf_stream_id(AVFormatContext *format_ctx) {
+    int result = -1;
+    for (unsigned int i = 0; i < format_ctx->nb_streams; i++) {
+        AVStream *stream = format_ctx->streams[i];
+        AVDictionaryEntry *entry = av_dict_get(stream->metadata, "handler_name", NULL, 0);
+        if (entry != NULL && strcmp(entry->value, "	GoPro MET") == 0) {
+            result = i;
+            break;
+        }
+    }
+    return result;
 }
 
 int open_input_file (IoContext *ctx) {
@@ -154,6 +169,11 @@ int open_input_file (IoContext *ctx) {
     if (ret < 0) {
         cout << "Failed to find a video stream in the input file!\n";
         return ret;
+    }
+
+    ctx->gpmf_stream = get_gpmf_stream_id(ctx->format_ctx);
+    if (ctx->gpmf_stream != -1) {
+        std::cerr << "Found GoPro metadata stream in input\n";
     }
 
     ctx->video_stream = ret;
@@ -669,17 +689,17 @@ int main (int argc, char* argv[])
                     ret = avcodec_send_packet(ioContext->decoder_ctx, &packet);
                     if (ret) {
                         state = ERROR;
-                        break;
                     }
-                    av_packet_unref(&packet);
+                } else if (packet.stream_index == ioContext->gpmf_stream) {
+                    std::cerr << "Got GPMF packet!!!\n";
                 } else {
-                    // fprintf(
-                    //     stderr,
-                    //     "Ignoring non-video packet at %lf seconds\n",
-                    //     1.0 * packet.pts * stream->time_base.den / stream->time_base.num
-                    // );
+                    // Ignore audio packets, etc
                 }
-                state = AWAITING_INPUT_FRAMES;
+
+                av_packet_unref(&packet);
+                if (state == AWAITING_INPUT_PACKETS) {
+                    state = AWAITING_INPUT_FRAMES;
+                }
                 break;
             }
             case AWAITING_INPUT_FRAMES: {
