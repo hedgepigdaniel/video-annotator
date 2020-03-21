@@ -258,11 +258,16 @@ function split_segment() {
 	OPTIONS=${@:5}
 
 	LOCKFILE="$OUTPUT".lock
+	COMPLETEFILE="$OUTPUT".complete
 
 	if { set -C; 2>/dev/null > "$LOCKFILE"; }; then
-    	trap 'rm -f "$LOCKFILE"' EXIT
+		if [ -e "$COMPLETEFILE" ]; then
+			echo "$OUTPUT has already been created"
+			exit
+		fi
+    	trap 'touch "$COMPLETEFILE"; rm -f "$LOCKFILE"' EXIT
 	else
-		echo "$OUTPUT is already claimed by another worker"
+		echo "$OUTPUT is already in progress by another worker"
 		exit
 	fi
 
