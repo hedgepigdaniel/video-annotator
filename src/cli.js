@@ -14,6 +14,7 @@ const wrapError = (action) => async () => {
     await action(...commander.args);
   } catch (e) {
     console.error(e);
+    process.exit(1);
   }
 };
 
