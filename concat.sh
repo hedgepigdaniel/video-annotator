@@ -265,7 +265,7 @@ function split_segment() {
 			echo "$OUTPUT has already been created"
 			exit
 		fi
-    	trap 'touch "$COMPLETEFILE"; rm -f "$LOCKFILE"' EXIT
+    	trap 'rm -f "$LOCKFILE"' EXIT
 	else
 		echo "$OUTPUT is already in progress by another worker"
 		exit
@@ -278,6 +278,7 @@ function split_segment() {
 	echo "OPTIONS: $OPTIONS"
 
 	$(dirname $0)/dist/cli.js render "$RECORDING.mp4" "$OUTPUT" -s "$SEGMENT_START" -e "$SEGMENT_END" $OPTIONS
+	touch "$COMPLETEFILE"
 }
 
 function encode() {
