@@ -22,6 +22,8 @@ libavutil = dependency('libavutil')
 opencv = dependency('opencv4')
 opencl = dependency('OpenCL')
 libva_drm = dependency('libva-drm')
+gpmf_parser = dependency('gpmf-parser')
+
 
 dependencies = [
     libavformat,
@@ -30,6 +32,7 @@ dependencies = [
     opencv,
     opencl,
     libva_drm,
+    gpmf_parser,
 ]
 
 executable(

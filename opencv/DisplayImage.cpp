@@ -14,6 +14,7 @@ extern "C" {
     #include <libavutil/hwcontext_opencl.h>
     #include <libavutil/pixdesc.h>
     #include <va/va_drm.h>
+    #include <GPMF_parser.h>
 }
 
 #include <iostream>
@@ -500,6 +501,120 @@ int process_frame(IoContext *ioContext, AVFrame *frame) {
     return ret;
 }
 
+GPMF_ERR read_sample_data(GPMF_stream gs_stream, GPMF_SampleType sample_type, uint32_t *samples, uint32_t *elements, void **buffer, int *buffer_size) {
+    int ret;
+    *samples = GPMF_Repeat(&gs_stream);
+    *elements = GPMF_ElementsInStruct(&gs_stream);
+    *buffer_size = GPMF_ScaledDataSize(&gs_stream, sample_type);
+    *buffer = malloc(*buffer_size);
+    if (*buffer == NULL) {
+        std::cerr << "Failed to allocate memory for GPMF data\n";
+        return GPMF_ERROR_MEMORY;
+    }
+    ret = GPMF_ScaledData(&gs_stream, *buffer, *buffer_size, 0, *samples, sample_type);
+    if (ret != GPMF_OK) {
+        std::cerr << "Failed to read GPMF samples: " << ret << "\n";
+        free(*buffer);
+        *buffer = NULL;
+    }
+    return ret;
+}
+
+int find_first_frame_timestamp(GPMF_stream gs_stream) {
+    // //SHUT should be preset in all GoPro files, if STMP and SHUT are both present, additional sync precision can be obtained.
+    // if (GPMF_OK == GPMF_FindNext(&gs_stream, GPMF_KEY_TIME_STAMP, GPMF_RECURSE_LEVELS))
+    // {
+    //     double start = 0.0, end;
+
+    //     if (GPMF_OK == GPMF_FindNext(&gs_stream, STR2FOURCC("SHUT"), GPMF_RECURSE_LEVELS))
+    //     {
+    //         //if SHUT contains TMSP (timestamps) very more  precision sync with video data can be achieved
+    //         if (GPMF_OK == GPMF_FindPrev(&gs_stream, GPMF_KEY_TIME_STAMP, GPMF_CURRENT_LEVEL))
+    //         {
+    //             double rate = GetGPMFSampleRate(mp4, STR2FOURCC("SHUT"), GPMF_SAMPLE_RATE_PRECISE, &start, &end);// GPMF_SAMPLE_RATE_FAST);
+    //             start_offset = start - payload_in;
+    //         }
+    //     }
+    // }
+    return 0;
+}
+
+int process_sensor_data(uint32_t *buffer, int size, double pkt_timestamp, double pkt_duration) {
+    GPMF_stream gs_stream;
+    int ret;
+    uint32_t samples;
+    uint32_t elements;
+    double est_timestamp;
+    void *temp_buffer;
+    int temp_buffer_size;
+
+    ret = GPMF_Init(&gs_stream, buffer, size);
+    if (ret != GPMF_OK) {
+        std::cerr << "Failed to parse GPMF packet: " << ret << "\n";
+        return -1;
+    }
+    find_first_frame_timestamp(gs_stream);
+    do
+	{
+        for (uint32_t i = 0; i < GPMF_NestLevel(&gs_stream); i++) {
+            std::cerr << "\t";
+        }
+        fprintf(stderr, "GPMF key: %c%c%c%c\n", PRINTF_4CC(GPMF_Key(&gs_stream)));
+		switch(GPMF_Key(&gs_stream)) {
+            case STR2FOURCC("ACCL"):
+                ret = read_sample_data(gs_stream, GPMF_TYPE_DOUBLE, &samples, &elements, &temp_buffer, &temp_buffer_size);
+                if (ret != GPMF_OK) {
+                    return ret;
+                }
+                if (elements != 3) {
+                    std::cerr << "Unexpected number of elements for ACCL data: " << elements << "\n";
+                    free(temp_buffer);
+                    return -1;
+                }
+                std::cerr << "Found ACCL data with " << samples << " samples\n";
+                for (uint32_t sample = 0; sample < samples; sample++) {
+                    est_timestamp = pkt_timestamp + pkt_duration * sample / samples;
+                    std::cerr << "ACCL " << est_timestamp << ":";
+                    for (uint32_t element = 0; element < elements; element++) {
+                        std::cerr << ((double *) temp_buffer)[sample * elements + element] << ", ";
+                    }
+                    std::cerr << "\n";
+                }
+                free(temp_buffer);
+                break;
+
+            case STR2FOURCC("GYRO"):
+                ret = read_sample_data(gs_stream, GPMF_TYPE_DOUBLE, &samples, &elements, &temp_buffer, &temp_buffer_size);
+                if (ret != GPMF_OK) {
+                    return ret;
+                }
+                if (elements != 3) {
+                    std::cerr << "Unexpected number of elements for GYRO data: " << elements << "\n";
+                    free(temp_buffer);
+                    return -1;
+                }
+                std::cerr << "Found GYRO data with " << samples << " samples\n";
+                for (uint32_t sample = 0; sample < samples; sample++) {
+                    est_timestamp = pkt_timestamp + pkt_duration * sample / samples;
+                    std::cerr << "GYRO " << est_timestamp << ":";
+                    for (uint32_t element = 0; element < elements; element++) {
+                        std::cerr << ((double *) temp_buffer)[sample * elements + element] << ", ";
+                    }
+                    std::cerr << "\n";
+                }
+                free(temp_buffer);
+                break;
+        }
+        ret = GPMF_Next(&gs_stream, GPMF_RECURSE_LEVELS);
+	} while (ret == GPMF_OK);
+
+    if (ret != GPMF_ERROR_BUFFER_END && ret != GPMF_ERROR_LAST) {
+        std::cerr << "Failed to parse GPMF node: " << ret << "\n";
+        return -1;
+    }
+    return 0;
+}
+
 int init_opencv_opencl_from_hwctx(AVBufferRef *ocl_device_ctx) {
     int ret = 0;
     AVHWDeviceContext *ocl_hw_device_ctx;
@@ -678,6 +793,7 @@ int main (int argc, char* argv[])
     ReadState state = AWAITING_INPUT_PACKETS;
     AVFrame *frame;
     int n_decoded_frames = 0;
+    int n_demuxed_frames = 0;
     int frames_in_interval = 0;
     steady_clock::time_point fps_interval_start = steady_clock::now();
 
@@ -700,19 +816,47 @@ int main (int argc, char* argv[])
                     break;
                 }
 
-                // AVStream *stream = ioContext->format_ctx->streams[packet.stream_index];
+                AVStream *stream = ioContext->format_ctx->streams[packet.stream_index];
                 if (packet.stream_index == ioContext->video_stream) {
+                    std::cerr << "Video frame number: " << n_demuxed_frames << "\n";
+                    n_demuxed_frames++;
+                    std::cerr << "Video frame presentation: " <<
+                        1.0 * packet.pts * stream->time_base.num / stream->time_base.den <<
+                       " (" << packet.pts << " * " << stream->time_base.num <<
+                        " / " << stream->time_base.den << ")\n";
+                    std::cerr << "Video frame duration: " <<
+                        1.0 * packet.duration * stream->time_base.num / stream->time_base.den <<
+                       " (" << packet.duration << " * " << stream->time_base.num <<
+                        " / " << stream->time_base.den << ")\n";
                     // fprintf(
                     //     stderr,
                     //     "Read video packet at %lf seconds\n",
                     //     1.0 * packet.pts * stream->time_base.num / stream->time_base.den
                     // );
-                    ret = avcodec_send_packet(ioContext->decoder_ctx, &packet);
+                    // ret = avcodec_send_packet(ioContext->decoder_ctx, &packet);
+                    // if (ret) {
+                    //     state = ERROR;
+                    // }
+                } else if (packet.stream_index == ioContext->gpmf_stream) {
+                    double pt_timestamp = 1.0 * packet.pts * stream->time_base.num / stream->time_base.den;
+                    double pt_duration = 1.0 * packet.duration * stream->time_base.num / stream->time_base.den;
+                    std::cerr << "GPMF frame presentation: " <<
+                        1.0 * packet.pts * stream->time_base.num / stream->time_base.den <<
+                        " (" << packet.pts << " * " << stream->time_base.num <<
+                        " / " << stream->time_base.den << ")\n";
+                    std::cerr << "GPMF frame duration: " <<
+                        1.0 * packet.duration * stream->time_base.num / stream->time_base.den <<
+                       " (" << packet.duration << " * " << stream->time_base.num <<
+                        " / " << stream->time_base.den << ")\n";
+                    ret = process_sensor_data(
+                        (uint32_t *) packet.data,
+                        packet.size,
+                        pt_timestamp,
+                        pt_duration
+                    );
                     if (ret) {
                         state = ERROR;
                     }
-                } else if (packet.stream_index == ioContext->gpmf_stream) {
-                    std::cerr << "Got GPMF packet!!!\n";
                 } else {
                     // Ignore audio packets, etc
                 }
