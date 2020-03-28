@@ -27,6 +27,8 @@ extern "C" {
 #include <math.h>
 #include <deque>
 
+#include "utils.hpp"
+
 using namespace std;
 using namespace cv;
 using namespace std::chrono;
@@ -34,13 +36,6 @@ using namespace std::chrono;
 #define DRM_DEVICE_PATH "/dev/dri/renderD128"
 
 #define PI 3.14159265
-
-#define ERR_STRING_BUF_SIZE 50
-char err_string[ERR_STRING_BUF_SIZE];
-
-char* errString(int errnum) {
-    return av_make_error_string(err_string, ERR_STRING_BUF_SIZE, errnum);
-}
 
 void printOpenClInfo(void) {
     ocl::Context context;
