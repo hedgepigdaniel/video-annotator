@@ -526,25 +526,6 @@ GPMF_ERR read_sample_data(GPMF_stream gs_stream, GPMF_SampleType sample_type, ui
     return ret;
 }
 
-int find_first_frame_timestamp(GPMF_stream gs_stream) {
-    // //SHUT should be preset in all GoPro files, if STMP and SHUT are both present, additional sync precision can be obtained.
-    // if (GPMF_OK == GPMF_FindNext(&gs_stream, GPMF_KEY_TIME_STAMP, GPMF_RECURSE_LEVELS))
-    // {
-    //     double start = 0.0, end;
-
-    //     if (GPMF_OK == GPMF_FindNext(&gs_stream, STR2FOURCC("SHUT"), GPMF_RECURSE_LEVELS))
-    //     {
-    //         //if SHUT contains TMSP (timestamps) very more  precision sync with video data can be achieved
-    //         if (GPMF_OK == GPMF_FindPrev(&gs_stream, GPMF_KEY_TIME_STAMP, GPMF_CURRENT_LEVEL))
-    //         {
-    //             double rate = GetGPMFSampleRate(mp4, STR2FOURCC("SHUT"), GPMF_SAMPLE_RATE_PRECISE, &start, &end);// GPMF_SAMPLE_RATE_FAST);
-    //             start_offset = start - payload_in;
-    //         }
-    //     }
-    // }
-    return 0;
-}
-
 int process_sensor_data(
     IoContext *ioContext,
     uint32_t *buffer,
@@ -566,7 +547,6 @@ int process_sensor_data(
         std::cerr << "Failed to parse GPMF packet: " << ret << "\n";
         return -1;
     }
-    find_first_frame_timestamp(gs_stream);
     do
 	{
         for (uint32_t i = 0; i < GPMF_NestLevel(&gs_stream); i++) {
