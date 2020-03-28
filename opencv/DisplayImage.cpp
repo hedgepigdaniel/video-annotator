@@ -25,6 +25,7 @@ extern "C" {
 #include <unistd.h>
 #include <chrono>
 #include <math.h>
+#include <deque>
 
 using namespace std;
 using namespace cv;
@@ -80,12 +81,21 @@ void initOpenClFromVaapi () {
     printOpenClInfo();
 }
 
+typedef struct _GyroFrame {
+    double start_ts;
+    double end_ts;
+    double roll;
+    double pitch;
+    double yaw;
+} GyroFrame;
+
 typedef struct _FramesContext {
     UMat map_x;
     UMat map_y;
     UMat last_frame_gray;
     vector <Point2f> last_frame_corners;
     vector<Mat> transforms;
+    deque<GyroFrame> gyro_frames;
 } FramesContext;
 
 typedef struct _IoContext {
@@ -113,6 +123,7 @@ IoContext * ioContext_alloc() {
     ctx->frames_ctx.last_frame_gray = UMat();
     ctx->frames_ctx.last_frame_corners = vector<Point2f>();
     ctx->frames_ctx.transforms = vector<Mat>();
+    ctx->frames_ctx.gyro_frames = deque<GyroFrame>();
     return ctx;
 }
 
@@ -539,14 +550,21 @@ int find_first_frame_timestamp(GPMF_stream gs_stream) {
     return 0;
 }
 
-int process_sensor_data(uint32_t *buffer, int size, double pkt_timestamp, double pkt_duration) {
+int process_sensor_data(
+    IoContext *ioContext,
+    uint32_t *buffer,
+    int size,
+    double pkt_timestamp,
+    double pkt_duration
+) {
     GPMF_stream gs_stream;
     int ret;
     uint32_t samples;
     uint32_t elements;
-    double est_timestamp;
+    // double est_timestamp;
     void *temp_buffer;
     int temp_buffer_size;
+    GyroFrame gyro_frame;
 
     ret = GPMF_Init(&gs_stream, buffer, size);
     if (ret != GPMF_OK) {
@@ -561,27 +579,27 @@ int process_sensor_data(uint32_t *buffer, int size, double pkt_timestamp, double
         }
         fprintf(stderr, "GPMF key: %c%c%c%c\n", PRINTF_4CC(GPMF_Key(&gs_stream)));
 		switch(GPMF_Key(&gs_stream)) {
-            case STR2FOURCC("ACCL"):
-                ret = read_sample_data(gs_stream, GPMF_TYPE_DOUBLE, &samples, &elements, &temp_buffer, &temp_buffer_size);
-                if (ret != GPMF_OK) {
-                    return ret;
-                }
-                if (elements != 3) {
-                    std::cerr << "Unexpected number of elements for ACCL data: " << elements << "\n";
-                    free(temp_buffer);
-                    return -1;
-                }
-                std::cerr << "Found ACCL data with " << samples << " samples\n";
-                for (uint32_t sample = 0; sample < samples; sample++) {
-                    est_timestamp = pkt_timestamp + pkt_duration * sample / samples;
-                    std::cerr << "ACCL " << est_timestamp << ":";
-                    for (uint32_t element = 0; element < elements; element++) {
-                        std::cerr << ((double *) temp_buffer)[sample * elements + element] << ", ";
-                    }
-                    std::cerr << "\n";
-                }
-                free(temp_buffer);
-                break;
+            // case STR2FOURCC("ACCL"):
+            //     ret = read_sample_data(gs_stream, GPMF_TYPE_DOUBLE, &samples, &elements, &temp_buffer, &temp_buffer_size);
+            //     if (ret != GPMF_OK) {
+            //         return ret;
+            //     }
+            //     if (elements != 3) {
+            //         std::cerr << "Unexpected number of elements for ACCL data: " << elements << "\n";
+            //         free(temp_buffer);
+            //         return -1;
+            //     }
+            //     std::cerr << "Found ACCL data with " << samples << " samples\n";
+            //     for (uint32_t sample = 0; sample < samples; sample++) {
+            //         est_timestamp = pkt_timestamp + pkt_duration * sample / samples;
+            //         std::cerr << "ACCL " << est_timestamp << ":";
+            //         for (uint32_t element = 0; element < elements; element++) {
+            //             std::cerr << ((double *) temp_buffer)[sample * elements + element] << ", ";
+            //         }
+            //         std::cerr << "\n";
+            //     }
+            //     free(temp_buffer);
+            //     break;
 
             case STR2FOURCC("GYRO"):
                 ret = read_sample_data(gs_stream, GPMF_TYPE_DOUBLE, &samples, &elements, &temp_buffer, &temp_buffer_size);
@@ -595,12 +613,15 @@ int process_sensor_data(uint32_t *buffer, int size, double pkt_timestamp, double
                 }
                 std::cerr << "Found GYRO data with " << samples << " samples\n";
                 for (uint32_t sample = 0; sample < samples; sample++) {
-                    est_timestamp = pkt_timestamp + pkt_duration * sample / samples;
-                    std::cerr << "GYRO " << est_timestamp << ":";
-                    for (uint32_t element = 0; element < elements; element++) {
-                        std::cerr << ((double *) temp_buffer)[sample * elements + element] << ", ";
-                    }
-                    std::cerr << "\n";
+                    gyro_frame.start_ts = pkt_timestamp + pkt_duration * sample / samples;
+                    gyro_frame.end_ts = gyro_frame.start_ts + pkt_duration / samples;
+                    gyro_frame.roll = ((double *) temp_buffer)[sample * elements + 0];
+                    gyro_frame.pitch = ((double *) temp_buffer)[sample * elements + 1];
+                    gyro_frame.yaw = ((double *) temp_buffer)[sample * elements + 2];
+                    // std::cerr << "GYRO " << gyro_frame.start_ts << " - " <<
+                    //     gyro_frame.end_ts << ": " << gyro_frame.yaw << ", " <<
+                    //     gyro_frame.pitch << ", " << gyro_frame.roll << "\n";
+                    ioContext->frames_ctx.gyro_frames.push_back(gyro_frame);
                 }
                 free(temp_buffer);
                 break;
@@ -849,6 +870,7 @@ int main (int argc, char* argv[])
                        " (" << packet.duration << " * " << stream->time_base.num <<
                         " / " << stream->time_base.den << ")\n";
                     ret = process_sensor_data(
+                        ioContext,
                         (uint32_t *) packet.data,
                         packet.size,
                         pt_timestamp,
