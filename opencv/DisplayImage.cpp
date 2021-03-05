@@ -1,5 +1,5 @@
+#include <CL/cl2.hpp>
 #include <opencv2/core.hpp>
-#include <opencv2/core/ocl.hpp>
 #include <opencv2/core/va_intel.hpp>
 #include <opencv2/videoio.hpp>
 #include <opencv2/highgui.hpp>
@@ -11,7 +11,6 @@ extern "C" {
     #include <libavformat/avformat.h>
     #include <libavcodec/avcodec.h>
     #include <libavutil/buffer.h>
-    #include <libavutil/hwcontext_opencl.h>
     #include <libavutil/pixdesc.h>
     #include <va/va_drm.h>
     #include <GPMF_parser.h>
@@ -28,6 +27,8 @@ extern "C" {
 #include <deque>
 
 #include "utils.hpp"
+#include "hw_init.hpp"
+#include "Warper.hpp"
 
 using namespace std;
 using namespace cv;
@@ -37,63 +38,8 @@ using namespace std::chrono;
 
 #define PI 3.14159265
 
-void printOpenClInfo(void) {
-    ocl::Context context;
-    if (!context.create(ocl::Device::TYPE_ALL))
-    {
-        cout << "Failed creating the context..." << endl;
-        //return;
-    }
-
-    cout << context.ndevices() << " CPU devices are detected." << endl; //This bit provides an overview of the OpenCL devices you have in your computer
-    for (uint i = 0; i < context.ndevices(); i++)
-    {
-        ocl::Device device = context.device(i);
-        cout << "name:              " << device.name() << endl;
-        cout << "available:         " << device.available() << endl;
-        cout << "imageSupport:      " << device.imageSupport() << endl;
-        cout << "OpenCL_C_Version:  " << device.OpenCL_C_Version() << endl;
-        cout << endl;
-    }
-}
-
-void initOpenClFromVaapi () {
-    int drm_device = -1;
-    drm_device = open(DRM_DEVICE_PATH, O_RDWR|O_CLOEXEC);
-    std::cout << "mtp:: drm_device= " << drm_device << std::endl;
-    if(drm_device < 0)
-    {
-        std::cout << "mtp:: GPU device not found...Exiting" << std::endl;
-        exit(-1);
-    }
-    VADisplay vaDisplay = vaGetDisplayDRM(drm_device);
-    if(!vaDisplay)
-       std::cout << "mtp:: Not a valid display" << std::endl;
-    close(drm_device);
-    if(!vaDisplay)
-        std::cout << "mtp:: Not a valid display::2nd" << std::endl;
-    va_intel::ocl::initializeContextFromVA (vaDisplay, true);
-    printOpenClInfo();
-}
-
-typedef struct _GyroFrame {
-    double start_ts;
-    double end_ts;
-    double roll;
-    double pitch;
-    double yaw;
-} GyroFrame;
-
-typedef struct _FramesContext {
-    UMat map_x;
-    UMat map_y;
-    UMat last_frame_gray;
-    vector <Point2f> last_frame_corners;
-    vector<Mat> transforms;
-    deque<GyroFrame> gyro_frames;
-} FramesContext;
-
-typedef struct _IoContext {
+class IoContext {
+  public:
     char *filename;
     AVBufferRef *vaapi_device_ctx;
     AVBufferRef *ocl_device_ctx;
@@ -101,26 +47,17 @@ typedef struct _IoContext {
     int video_stream;
     int gpmf_stream;
     AVCodecContext *decoder_ctx;
-    FramesContext frames_ctx;
-} IoContext;
-
-IoContext * ioContext_alloc() {
-    IoContext *ctx = (IoContext *) malloc(sizeof (IoContext));
-    ctx->filename = NULL;
-    ctx->vaapi_device_ctx = NULL;
-    ctx->ocl_device_ctx = NULL;
-    ctx->format_ctx = NULL;
-    ctx->video_stream = -1;
-    ctx->gpmf_stream = -1;
-    ctx->decoder_ctx = NULL;
-    ctx->frames_ctx.map_x = UMat();
-    ctx->frames_ctx.map_y = UMat();
-    ctx->frames_ctx.last_frame_gray = UMat();
-    ctx->frames_ctx.last_frame_corners = vector<Point2f>();
-    ctx->frames_ctx.transforms = vector<Mat>();
-    ctx->frames_ctx.gyro_frames = deque<GyroFrame>();
-    return ctx;
-}
+    Warper warper;
+    IoContext() {
+        filename = NULL;
+        vaapi_device_ctx = NULL;
+        ocl_device_ctx = NULL;
+        format_ctx = NULL;
+        video_stream = -1;
+        gpmf_stream = -1;
+        decoder_ctx = NULL;
+    }
+};
 
 static enum AVPixelFormat get_vaapi_format(
     AVCodecContext *ctx,
@@ -316,90 +253,6 @@ int convert_ocl_images_to_nv12_umat(cl_mem cl_luma, cl_mem cl_chroma, UMat& dst)
     }
 
     return ret;
-}
-
-int process_frame_mat(FramesContext *frames_ctx, UMat frame_input) {
-    UMat frame_bgr, frame_undistorted, frame_gray;
-    UMat last_frame_gray = frames_ctx->last_frame_gray;
-    vector <Point2f> last_frame_corners = frames_ctx->last_frame_corners;
-
-    // Undistort frame, convert to grayscale
-    cvtColor(frame_input, frame_bgr, COLOR_YUV2BGR_NV12);
-    remap(
-        frame_bgr,
-        frame_undistorted,
-        frames_ctx->map_x,
-        frames_ctx->map_y,
-        INTER_LINEAR
-    );
-    cvtColor(frame_undistorted, frame_gray, COLOR_BGR2GRAY);
-    // resize(frame_gray, frame_gray, Size(1280, 720));
-
-    // Find corners to track in current frame
-    vector <Point2f> corners;
-    goodFeaturesToTrack(frame_gray, corners, 200, 0.01, 30);
-    std::cerr << "Found " << corners.size() << " corners\n";
-
-    // // Display corners
-    // UMat frame_display = frame_gray.clone();
-    // for (size_t i = 0; i < corners.size(); i++) {
-    //     drawMarker(frame_display, corners[i], Scalar(0, 0, 255), MARKER_TRIANGLE_UP);
-    // }
-    // imshow("fast", frame_display);
-    // waitKey(20);
-
-    // Keep the frame and the corners found in it for next time
-    frames_ctx->last_frame_gray = frame_gray;
-    frames_ctx->last_frame_corners = corners;
-    if (last_frame_gray.empty()) {
-        return 0;
-    }
-
-    // If this is not the first frame, calculate optical flow
-    vector <Point2f> corners_filtered, last_frame_corners_filtered;
-    vector <uchar> status;
-    vector <float> err;
-
-    calcOpticalFlowPyrLK(
-        last_frame_gray,
-        frame_gray,
-        last_frame_corners,
-        corners,
-        status,
-        err
-    );
-    for (size_t i=0; i < status.size(); i++) {
-        if (status[i]) {
-            last_frame_corners_filtered.push_back(last_frame_corners[i]);
-            corners_filtered.push_back(corners[i]);
-        }
-    }
-
-    Mat homography = findHomography(last_frame_corners_filtered, corners_filtered, RANSAC);
-
-    std::cerr << "Homography: \n" << homography << "\n\n";
-
-    // decompose homography
-    double dx = homography.at<double>(0,2);
-    double dy = homography.at<double>(1,2);
-    double da = atan2(homography.at<double>(1,0), homography.at<double>(0,0));
-
-    fprintf(stderr, "homography: (%+.1f, %+.1f) %+.1f degrees\n", dx, dy, da * 180 / PI);
-
-    frames_ctx->transforms.push_back(homography.inv());
-
-    UMat stable = frame_gray.clone();
-    UMat temp;
-    Mat transform = frames_ctx->transforms[frames_ctx->transforms.size() - 1].clone();
-    for (size_t i = frames_ctx->transforms.size() - 2; i < frames_ctx->transforms.size(); i--) {
-        transform = transform * frames_ctx->transforms[i];
-    }
-    warpPerspective(stable, temp, transform, frame_gray.size());
-    stable = temp;
-
-    imshow("fast", stable);
-    waitKey(20);
-    return 0;
 }
 
 int init_remap_state (IoContext *ioContext) {
@@ -608,104 +461,6 @@ int process_sensor_data(
         std::cerr << "Failed to parse GPMF node: " << ret << "\n";
         return -1;
     }
-    return 0;
-}
-
-int init_opencv_opencl_from_hwctx(AVBufferRef *ocl_device_ctx) {
-    int ret = 0;
-    AVHWDeviceContext *ocl_hw_device_ctx;
-    AVOpenCLDeviceContext *ocl_device_ocl_ctx;
-    ocl_hw_device_ctx = (AVHWDeviceContext *) ocl_device_ctx->data;
-    ocl_device_ocl_ctx = (AVOpenCLDeviceContext *) ocl_hw_device_ctx->hwctx;
-    cl_context_properties *props = NULL;
-    cl_platform_id platform = NULL;
-    char *platform_name = NULL;
-    size_t param_value_size = 0;
-    ret = clGetContextInfo(
-        ocl_device_ocl_ctx->context,
-        CL_CONTEXT_PROPERTIES,
-        0,
-        NULL,
-        &param_value_size
-    );
-    if (ret != CL_SUCCESS) {
-        std::cerr << "clGetContextInfo failed to get props size\n";
-        return ret;
-    }
-    if (param_value_size == 0) {
-        std::cerr << "clGetContextInfo returned size 0\n";
-        return 1;
-    }
-    props = (cl_context_properties *) malloc(param_value_size);
-    if (props == NULL) {
-        std::cerr << "Failed to alloc props 0\n";
-        return AVERROR(ENOMEM);
-    }
-    ret = clGetContextInfo(
-        ocl_device_ocl_ctx->context,
-        CL_CONTEXT_PROPERTIES,
-        param_value_size,
-        props,
-        NULL
-    );
-    if (ret != CL_SUCCESS) {
-        std::cerr << "clGetContextInfo failed\n";
-        return ret;
-    }
-    for (int i = 0; props[i] != 0; i = i + 2) {
-        if (props[i] == CL_CONTEXT_PLATFORM) {
-            platform = (cl_platform_id) props[i + 1];
-        }
-    }
-    if (platform == NULL) {
-        std::cerr << "Failed to find platform in cl context props\n";
-        return 1;
-    }
-
-    ret = clGetPlatformInfo(
-        platform,
-        CL_PLATFORM_NAME,
-        0,
-        NULL,
-        &param_value_size
-    );
-
-    if (ret != CL_SUCCESS) {
-        std::cerr << "clGetPlatformInfo failed to get platform name size\n";
-        return ret;
-    }
-    if (param_value_size == 0) {
-        std::cerr << "clGetPlatformInfo returned 0 size for name\n";
-        return 1;
-    }
-    platform_name = (char *) malloc(param_value_size);
-    if (platform_name == NULL) {
-        std::cerr << "Failed to malloc platform_name\n";
-        return AVERROR(ENOMEM);
-    }
-    ret = clGetPlatformInfo(
-        platform,
-        CL_PLATFORM_NAME,
-        param_value_size,
-        platform_name,
-        NULL
-    );
-    if (ret != CL_SUCCESS) {
-        std::cerr << "clGetPlatformInfo failed\n";
-        return ret;
-    }
-
-    std::cerr << "Initialising OpenCV OpenCL context with platform \"" <<
-        platform_name <<
-        "\"\n";
-
-    ocl::Context::getDefault(false);
-    ocl::attachContext(
-        platform_name,
-        platform,
-        ocl_device_ocl_ctx->context,
-        ocl_device_ocl_ctx->device_id
-    );
     return 0;
 }
 

@@ -14,7 +14,7 @@ project(
 
 include_directories(['.'])
 
-display_image_sources = ['DisplayImage.cpp']
+display_image_sources = ['DisplayImage.cpp', 'hw_init.cpp', 'Warper.cpp']
 
 libavformat = dependency('libavformat')
 libavcodec = dependency('libavcodec')
