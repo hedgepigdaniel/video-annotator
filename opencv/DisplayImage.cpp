@@ -578,6 +578,17 @@ int init_opencv_opencl_from_hwctx(AVBufferRef *ocl_device_ctx) {
     return 0;
 }
 
+int has_hwaccel_support(enum AVHWDeviceType type) {
+    enum AVHWDeviceType current = av_hwdevice_iterate_types(AV_HWDEVICE_TYPE_NONE);
+    while (current != AV_HWDEVICE_TYPE_NONE) {
+        if (current == type) {
+            return true;
+        }
+        current = av_hwdevice_iterate_types(current);
+    }
+    return false;
+}
+
 int main (int argc, char* argv[])
 {
     if (argc < 2) {
@@ -588,6 +599,16 @@ int main (int argc, char* argv[])
     IoContext *ioContext = ioContext_alloc();
     AVPacket packet;
     ioContext->filename = argv[1];
+
+    if (!has_hwaccel_support(AV_HWDEVICE_TYPE_VAAPI)) {
+        fprintf(stderr, "Error: FFmpeg was built without VAAPI support\n");
+        return -1;
+    }
+
+    if (!has_hwaccel_support(AV_HWDEVICE_TYPE_OPENCL)) {
+        fprintf(stderr, "Error: FFmpeg was built without OpenCL support\n");
+        return -1;
+    }
 
     ret = av_hwdevice_ctx_create(
         &ioContext->vaapi_device_ctx,
