@@ -7,7 +7,7 @@
 #include <string>
 
 /**
- * Reads frames from a video file
+ * Reads VAAPI backed `AVFrame`s from a video file
  */
 class AvFrameSourceFileVaapi: public AvFrameSource {
     AVBufferRef *vaapi_device_ctx = NULL;
@@ -25,6 +25,7 @@ class AvFrameSourceFileVaapi: public AvFrameSource {
     AvFrameSourceFileVaapi(std::string file_path, AVBufferRef *vaapi_device_ctx);
     AVFrame* pull_frame();
     AVFrame* peek_frame();
+    ~AvFrameSourceFileVaapi();
 };
 
 #endif // _AV_FRAME_SOURCE_FILE_VAAPI_HPP_

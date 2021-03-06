@@ -98,6 +98,11 @@ AvFrameSourceFileVaapi::AvFrameSourceFileVaapi(std::string file_path, AVBufferRe
     }
 }
 
+AvFrameSourceFileVaapi::~AvFrameSourceFileVaapi() {
+    avformat_close_input(&this->format_ctx);
+    avcodec_free_context(&this->decoder_ctx);
+}
+
 void AvFrameSourceFileVaapi::read_input_packet() {
     int err;
     err = av_read_frame(this->format_ctx, &this->packet);

@@ -7,7 +7,7 @@
 #include <string>
 
 /**
- * Reads frames from a video file
+ * Maps VAAPI backed `AVFrame`s to OpenCL
  */
 class AvFrameSourceMapOpenCl: public AvFrameSource {
     AvFrameSource *source;
