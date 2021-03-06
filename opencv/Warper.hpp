@@ -27,6 +27,7 @@ class Warper {
     vector<Mat> transforms;
     deque<GyroFrame> gyro_frames;
   public:
+    Warper(int width, int height);
     /**
      * Push a video frame in for processing
      */
@@ -42,7 +43,7 @@ class Warper {
      * Attempt to read a processed output frame
      * Raises an exception if no frames are ready
      */
-    Umat read_frame();
+    UMat read_frame();
 };
 
 #endif // _WARPER_HPP_
