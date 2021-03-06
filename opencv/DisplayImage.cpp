@@ -3,12 +3,13 @@
 #include <opencv2/highgui.hpp>
 
 #include <iostream>
+#include <math.h>
 
 #include "hw_init.hpp"
 #include "AvFrameSourceFileVaapi.hpp"
 #include "AvFrameSourceMapOpenCl.hpp"
 #include "FrameSourceFfmpegOpenCl.hpp"
-#include "Warper.hpp"
+#include "FrameSourceWarp.hpp"
 
 using namespace std;
 using namespace cv;
@@ -35,13 +36,19 @@ int main (int argc, char* argv[])
 
     AvFrameSource *vaapi_source = new AvFrameSourceFileVaapi(argv[1], vaapi_device_ctx);
     AvFrameSource *opencl_source = new AvFrameSourceMapOpenCl(vaapi_source, opencl_device_ctx);
-    FrameSource *umat_source = new FrameSourceFfmpegOpenCl(opencl_source);
+    FrameSource *ffmpeg_source = new FrameSourceFfmpegOpenCl(opencl_source);
+
+    // Known field of view of the camera
+    // int v_fov_s = 94.4 * M_PI / 180;
+    // int h_fov_s = 122.6 * M_PI / 180;
+    int d_fov = 149.2 * M_PI / 180;
+    FrameSource *warped_source = new FrameSourceWarp(ffmpeg_source, d_fov);
 
     UMat frame;
     while (true) {
         try {
             cerr << "read frame\n";
-            frame = umat_source->pull_frame();
+            frame = warped_source->pull_frame();
             imshow("fast", frame);
             waitKey(1);
         } catch (int err) {
@@ -52,7 +59,8 @@ int main (int argc, char* argv[])
         }
     }
 
-    delete umat_source;
+    delete warped_source;
+    delete ffmpeg_source;
     delete opencl_source;
     delete vaapi_source;
     av_buffer_unref(&opencl_device_ctx);

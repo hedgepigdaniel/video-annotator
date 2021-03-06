@@ -9,13 +9,10 @@
  */
 class FrameSourceFfmpegOpenCl: public FrameSource {
     AvFrameSource *source;
+    cv::UMat next_frame;
   public:
-    /**
-     * Return the next frame and advance the current position
-     * Raises an exception if no frames are ready
-     */
     cv::UMat pull_frame();
-
+    cv::UMat peek_frame();
     FrameSourceFfmpegOpenCl(AvFrameSource *source);
 };
 

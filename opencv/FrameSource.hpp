@@ -14,6 +14,12 @@ class FrameSource {
      */
     virtual cv::UMat pull_frame() = 0;
 
+    /**
+     * Return the next frame but do not advance the current position
+     * Raises an exception if no frames are ready
+     */
+    virtual cv::UMat peek_frame() = 0;
+
     virtual ~FrameSource() = default;
 };
 

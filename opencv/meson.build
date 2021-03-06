@@ -17,7 +17,7 @@ include_directories(['.'])
 display_image_sources = [
     'DisplayImage.cpp',
     'hw_init.cpp',
-    'Warper.cpp',
+    'FrameSourceWarp.cpp',
     'AvFrameSourceFileVaapi.cpp',
     'AvFrameSourceMapOpenCl.cpp',
     'FrameSourceFfmpegOpenCl.cpp',

@@ -96,7 +96,10 @@ FrameSourceFfmpegOpenCl::FrameSourceFfmpegOpenCl(AvFrameSource *source) {
     this->source = source;
 }
 
-UMat FrameSourceFfmpegOpenCl::pull_frame() {
+UMat FrameSourceFfmpegOpenCl::peek_frame() {
+    if (!this->next_frame.empty()) {
+        return this->next_frame;
+    }
     int err;
     AVFrame *av_frame = this->source->pull_frame();
     UMat frame;
@@ -112,5 +115,12 @@ UMat FrameSourceFfmpegOpenCl::pull_frame() {
     }
 
     av_frame_free(&av_frame);
+    this->next_frame = frame;
+    return this->next_frame;
+}
+
+UMat FrameSourceFfmpegOpenCl::pull_frame() {
+    UMat frame = this->peek_frame();
+    this->next_frame = UMat();
     return frame;
 }

@@ -1,22 +1,22 @@
-#include "Warper.hpp"
+#include "FrameSourceWarp.hpp"
 
 #include <iostream>
+#include <math.h>
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/video/tracking.hpp>
 #include <opencv2/highgui.hpp>
 
-#define PI 3.14159265
-
 using namespace std;
 using namespace cv;
 
-Warper::Warper(int width, int height) {
-    // Known field of view of the camera
-    // int v_fov_s = 94.4 * PI / 180;
-    // int h_fov_s = 122.6 * PI / 180;
-    int d_fov = 149.2 * PI / 180;
+FrameSourceWarp::FrameSourceWarp(FrameSource *source, int d_fov) {
+    this->source = source;
+
+    UMat first_frame = source->peek_frame();
+    int width = first_frame.cols;
+    int height = first_frame.rows;
 
     // Center coordinates
     float center_x = width / 2;
@@ -56,13 +56,13 @@ Warper::Warper(int width, int height) {
     this->map_y = map_2;
 }
 
-int Warper::write_frame(UMat frame_input) {
+UMat FrameSourceWarp::warp_frame(UMat input_frame) {
     UMat frame_bgr, frame_undistorted, frame_gray;
     UMat last_frame_gray = this->last_frame_gray;
     vector <Point2f> last_frame_corners = this->last_frame_corners;
 
     // Undistort frame, convert to grayscale
-    cvtColor(frame_input, frame_bgr, COLOR_YUV2BGR_NV12);
+    cvtColor(input_frame, frame_bgr, COLOR_YUV2BGR_NV12);
     remap(
         frame_bgr,
         frame_undistorted,
@@ -90,7 +90,7 @@ int Warper::write_frame(UMat frame_input) {
     this->last_frame_gray = frame_gray;
     this->last_frame_corners = corners;
     if (last_frame_gray.empty()) {
-        return 0;
+        return frame_undistorted;
     }
 
     // If this is not the first frame, calculate optical flow
@@ -122,7 +122,7 @@ int Warper::write_frame(UMat frame_input) {
     double dy = homography.at<double>(1,2);
     double da = atan2(homography.at<double>(1,0), homography.at<double>(0,0));
 
-    fprintf(stderr, "homography: (%+.1f, %+.1f) %+.1f degrees\n", dx, dy, da * 180 / PI);
+    fprintf(stderr, "homography: (%+.1f, %+.1f) %+.1f degrees\n", dx, dy, da * 180 / M_PI);
 
     this->transforms.push_back(homography.inv());
 
@@ -135,7 +135,13 @@ int Warper::write_frame(UMat frame_input) {
     warpPerspective(stable, temp, transform, frame_gray.size());
     stable = temp;
 
-    imshow("fast", stable);
-    waitKey(20);
-    return 0;
+    return stable;
+}
+
+UMat FrameSourceWarp::pull_frame() {
+    return this->warp_frame(this->source->pull_frame());
+}
+
+UMat FrameSourceWarp::peek_frame() {
+    return this->warp_frame(this->source->peek_frame());
 }
