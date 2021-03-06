@@ -3,9 +3,15 @@
 
 extern "C" {
     #include <libavutil/buffer.h>
+    #include <libavformat/avformat.h>
 }
 
+bool is_vaapi_and_opencl_supported();
 
-int init_opencv_opencl_from_hwctx(AVBufferRef *ocl_device_ctx);
+AVBufferRef* create_vaapi_context();
+
+AVBufferRef* create_opencl_context_from_vaapi(AVBufferRef *vaapi_device_ctx);
+
+void init_opencv_from_opencl_context(AVBufferRef *ocl_device_ctx);
 
 #endif // _HW_INIT_H_

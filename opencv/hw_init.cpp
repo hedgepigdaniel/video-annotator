@@ -7,10 +7,68 @@ extern "C" {
     #include <libavutil/hwcontext_opencl.h>
 }
 
+#include "utils.hpp"
+
+using namespace std;
 using namespace cv;
 
-int init_opencv_opencl_from_hwctx(AVBufferRef *ocl_device_ctx) {
-    int ret = 0;
+int has_hwaccel_support(enum AVHWDeviceType type) {
+    enum AVHWDeviceType current = av_hwdevice_iterate_types(AV_HWDEVICE_TYPE_NONE);
+    while (current != AV_HWDEVICE_TYPE_NONE) {
+        if (current == type) {
+            return true;
+        }
+        current = av_hwdevice_iterate_types(current);
+    }
+    return false;
+}
+
+bool is_vaapi_and_opencl_supported() {
+    if (!has_hwaccel_support(AV_HWDEVICE_TYPE_VAAPI)) {
+        return false;
+    }
+
+    if (!has_hwaccel_support(AV_HWDEVICE_TYPE_OPENCL)) {
+        return false;
+    }
+    return true;
+}
+
+AVBufferRef* create_vaapi_context() {
+    AVBufferRef *vaapi_device_ctx = NULL;
+    int ret;
+    ret = av_hwdevice_ctx_create(
+        &vaapi_device_ctx,
+        AV_HWDEVICE_TYPE_VAAPI,
+        NULL,
+        NULL,
+        0
+    );
+    if (ret < 0) {
+        cerr << "Failed to create a VAAPI device context:"<< errString(ret) << "\n";
+        throw ret;
+    }
+    return vaapi_device_ctx;
+}
+
+AVBufferRef* create_opencl_context_from_vaapi(AVBufferRef *vaapi_device_ctx) {
+    AVBufferRef *opencl_device_ctx = NULL;
+    int ret;
+    ret = av_hwdevice_ctx_create_derived(
+        &opencl_device_ctx,
+        AV_HWDEVICE_TYPE_OPENCL,
+        vaapi_device_ctx,
+        0
+    );
+    if (ret < 0) {
+        cerr << "Failed to map VAAPI device to OpenCL device:" << errString(ret) << "\n";
+        throw ret;
+    }
+    return opencl_device_ctx;
+}
+
+void init_opencv_from_opencl_context(AVBufferRef *ocl_device_ctx) {
+    int err = 0;
     AVHWDeviceContext *ocl_hw_device_ctx;
     AVOpenCLDeviceContext *ocl_device_ocl_ctx;
     ocl_hw_device_ctx = (AVHWDeviceContext *) ocl_device_ctx->data;
@@ -19,36 +77,36 @@ int init_opencv_opencl_from_hwctx(AVBufferRef *ocl_device_ctx) {
     cl_platform_id platform = NULL;
     char *platform_name = NULL;
     size_t param_value_size = 0;
-    ret = clGetContextInfo(
+    err = clGetContextInfo(
         ocl_device_ocl_ctx->context,
         CL_CONTEXT_PROPERTIES,
         0,
         NULL,
         &param_value_size
     );
-    if (ret != CL_SUCCESS) {
+    if (err != CL_SUCCESS) {
         std::cerr << "clGetContextInfo failed to get props size\n";
-        return ret;
+        throw err;
     }
     if (param_value_size == 0) {
         std::cerr << "clGetContextInfo returned size 0\n";
-        return 1;
+        throw 1;
     }
     props = (cl_context_properties *) malloc(param_value_size);
     if (props == NULL) {
         std::cerr << "Failed to alloc props 0\n";
-        return AVERROR(ENOMEM);
+        throw AVERROR(ENOMEM);
     }
-    ret = clGetContextInfo(
+    err = clGetContextInfo(
         ocl_device_ocl_ctx->context,
         CL_CONTEXT_PROPERTIES,
         param_value_size,
         props,
         NULL
     );
-    if (ret != CL_SUCCESS) {
+    if (err != CL_SUCCESS) {
         std::cerr << "clGetContextInfo failed\n";
-        return ret;
+        throw err;
     }
     for (int i = 0; props[i] != 0; i = i + 2) {
         if (props[i] == CL_CONTEXT_PLATFORM) {
@@ -57,10 +115,10 @@ int init_opencv_opencl_from_hwctx(AVBufferRef *ocl_device_ctx) {
     }
     if (platform == NULL) {
         std::cerr << "Failed to find platform in cl context props\n";
-        return 1;
+        throw 1;
     }
 
-    ret = clGetPlatformInfo(
+    err = clGetPlatformInfo(
         platform,
         CL_PLATFORM_NAME,
         0,
@@ -68,29 +126,29 @@ int init_opencv_opencl_from_hwctx(AVBufferRef *ocl_device_ctx) {
         &param_value_size
     );
 
-    if (ret != CL_SUCCESS) {
+    if (err != CL_SUCCESS) {
         std::cerr << "clGetPlatformInfo failed to get platform name size\n";
-        return ret;
+        throw err;
     }
     if (param_value_size == 0) {
         std::cerr << "clGetPlatformInfo returned 0 size for name\n";
-        return 1;
+        throw 1;
     }
     platform_name = (char *) malloc(param_value_size);
     if (platform_name == NULL) {
         std::cerr << "Failed to malloc platform_name\n";
-        return AVERROR(ENOMEM);
+        throw AVERROR(ENOMEM);
     }
-    ret = clGetPlatformInfo(
+    err = clGetPlatformInfo(
         platform,
         CL_PLATFORM_NAME,
         param_value_size,
         platform_name,
         NULL
     );
-    if (ret != CL_SUCCESS) {
+    if (err != CL_SUCCESS) {
         std::cerr << "clGetPlatformInfo failed\n";
-        return ret;
+        throw err;
     }
 
     std::cerr << "Initialising OpenCV OpenCL context with platform \"" <<
@@ -104,5 +162,4 @@ int init_opencv_opencl_from_hwctx(AVBufferRef *ocl_device_ctx) {
         ocl_device_ocl_ctx->context,
         ocl_device_ocl_ctx->device_id
     );
-    return 0;
 }

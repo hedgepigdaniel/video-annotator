@@ -9,10 +9,12 @@
 class FrameSource {
   public:
     /**
-     * Attempt to read a frame
+     * Return the next frame and advance the current position
      * Raises an exception if no frames are ready
      */
-    cv::Mat read_frame();
+    virtual cv::UMat pull_frame() = 0;
+
+    virtual ~FrameSource() = default;
 };
 
 #endif // _FRAME_SOURCE_HPP_

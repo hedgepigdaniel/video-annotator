@@ -28,7 +28,9 @@ extern "C" {
 
 #include "utils.hpp"
 #include "hw_init.hpp"
-#include "AvFrameSourceOpenCl.hpp"
+#include "AvFrameSourceFileVaapi.hpp"
+#include "AvFrameSourceMapOpenCl.hpp"
+#include "FrameSourceFfmpegOpenCl.hpp"
 #include "Warper.hpp"
 
 using namespace std;
@@ -42,114 +44,6 @@ using namespace std::chrono;
 //     avformat_close_input(&ctx->format_ctx);
 //     avcodec_free_context(&ctx->decoder_ctx);
 //     av_buffer_unref(&ctx->vaapi_device_ctx);
-// }
-
-/*
-// Convert OpenCL image2d_t memory to UMat
-*/
-int convert_ocl_images_to_nv12_umat(cl_mem cl_luma, cl_mem cl_chroma, UMat& dst)
-{
-    int ret = 0;
-
-    cl_image_format luma_fmt = { 0, 0 };
-    cl_image_format chroma_fmt = { 0, 0 };
-    ret = clGetImageInfo(cl_luma, CL_IMAGE_FORMAT, sizeof(cl_image_format), &luma_fmt, 0);
-    if (ret) {
-        std::cerr << "Failed to get luma image format: " << ret << "\n";
-        return ret;
-    }
-    ret = clGetImageInfo(cl_chroma, CL_IMAGE_FORMAT, sizeof(cl_image_format), &chroma_fmt, 0);
-    if (ret) {
-        std::cerr << "Failed to get chroma image format: " << ret << "\n";
-        return ret;
-    }
-    if (luma_fmt.image_channel_data_type != CL_UNORM_INT8 ||
-    chroma_fmt.image_channel_data_type != CL_UNORM_INT8) {
-        std::cerr << "Wrong image format\n";
-        return 1;
-    }
-    if (luma_fmt.image_channel_order != CL_R ||
-    chroma_fmt.image_channel_order != CL_RG) {
-        std::cerr << "Wrong image channel order\n";
-        return 1;
-    }
-
-    size_t luma_w = 0;
-    size_t luma_h = 0;
-    size_t chroma_w = 0;
-    size_t chroma_h = 0;
-
-    ret |= clGetImageInfo(cl_luma, CL_IMAGE_WIDTH, sizeof(size_t), &luma_w, 0);
-    ret |= clGetImageInfo(cl_luma, CL_IMAGE_HEIGHT, sizeof(size_t), &luma_h, 0);
-    ret |= clGetImageInfo(cl_chroma, CL_IMAGE_WIDTH, sizeof(size_t), &chroma_w, 0);
-    ret |= clGetImageInfo(cl_chroma, CL_IMAGE_HEIGHT, sizeof(size_t), &chroma_h, 0);
-    if (ret) {
-        std::cerr << "Failed to get image info: " << ret << "\n";
-        return ret;
-    }
-
-    if (luma_w != 2 * chroma_w || luma_h != 2 *chroma_h ) {
-        std::cerr << "Mismatched image dimensions\n";
-        return 1;
-    }
-
-    dst.create(luma_h + chroma_h, luma_w, CV_8U);
-    cl_mem dst_buffer = (cl_mem) dst.handle(ACCESS_READ);
-    cl_command_queue queue = (cl_command_queue) ocl::Queue::getDefault().ptr();
-    size_t src_origin[3] = { 0, 0, 0 };
-    size_t luma_region[3] = { luma_w, luma_h, 1 };
-    size_t chroma_region[3] = { chroma_w, chroma_h * 2, 1 };
-    ret = clEnqueueCopyImageToBuffer(
-        queue,
-        cl_luma,
-        dst_buffer,
-        src_origin,
-        luma_region,
-        0,
-        0,
-        NULL,
-        NULL
-    );
-    ret |= clEnqueueCopyImageToBuffer(
-        queue,
-        cl_chroma,
-        dst_buffer,
-        src_origin,
-        chroma_region,
-        luma_w * luma_h * 1,
-        0,
-        NULL,
-        NULL
-    );
-    ret |= clFinish(queue);
-    if (ret) {
-        std::cerr << "Failed to enqueue image copy to buffer\n";
-        return ret;
-    }
-
-    return ret;
-}
-
-// int process_frame(IoContext *ioContext, AVFrame *ocl_frame) {
-//     int ret;
-//     UMat frame_mat;
-//     ret = convert_ocl_images_to_nv12_umat(
-//         (cl_mem) ocl_frame->data[0],
-//         (cl_mem) ocl_frame->data[1],
-//         frame_mat
-//     );
-//     if (ret) {
-//         std::cerr << "Failed to convert OpenCL images to opencv\n";
-//         return ret;
-//     }
-//     ret = process_frame_mat(&ioContext->frames_ctx, frame_mat);
-//     if (ret) {
-//         std::cerr << "Failed to process frame matrix\n";
-//         return ret;
-//     }
-
-//     av_frame_unref(ocl_frame);
-//     return ret;
 // }
 
 // GPMF_ERR read_sample_data(GPMF_stream gs_stream, GPMF_SampleType sample_type, uint32_t *samples, uint32_t *elements, void **buffer, int *buffer_size) {
@@ -263,17 +157,27 @@ int main (int argc, char* argv[])
         return 1;
     }
 
-    if (!AvFrameSourceOpenCl::is_supported()) {
+    if (!is_vaapi_and_opencl_supported()) {
         cerr << "Error: FFmpeg was built without VAAPI or OpenCL support\n";
-        return -1;
+        return 2;
     }
-    AvFrameSourceOpenCl av_frame_source = AvFrameSourceOpenCl(argv[1]);
 
-    AVFrame *frame;
+    // Set up compatible hardware contexts
+    AVBufferRef *vaapi_device_ctx = create_vaapi_context();
+    AVBufferRef *opencl_device_ctx = create_opencl_context_from_vaapi(vaapi_device_ctx);
+    init_opencv_from_opencl_context(opencl_device_ctx);
+
+    AvFrameSource *vaapi_source = new AvFrameSourceFileVaapi(argv[1], vaapi_device_ctx);
+    AvFrameSource *opencl_source = new AvFrameSourceMapOpenCl(vaapi_source, opencl_device_ctx);
+    FrameSource *umat_source = new FrameSourceFfmpegOpenCl(opencl_source);
+
+    UMat frame;
     while (true) {
         try {
-            frame = av_frame_source.pull_frame();
-            av_frame_free(&frame);
+            cerr << "read frame\n";
+            frame = umat_source->pull_frame();
+            imshow("fast", frame);
+            waitKey(1);
         } catch (int err) {
             if (err == EOF) {
                 break;
@@ -411,5 +315,8 @@ int main (int argc, char* argv[])
     // }
 
     // close_input_file(ioContext);
+
+    av_buffer_unref(&opencl_device_ctx);
+    av_buffer_unref(&vaapi_device_ctx);
     return 0;
 }
