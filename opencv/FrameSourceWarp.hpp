@@ -21,6 +21,12 @@ class FrameSourceWarp: public FrameSource {
     vector <Point2f> last_frame_corners;
     vector<Mat> transforms;
     cv::UMat warp_frame(UMat input_frame);
+
+    Point2d center;
+    double max_radius_d;
+    double max_radius_d_pixels;
+    Point2d mapPointToSource(int x, int y);
+    Point2d mapPointFromSource(float x, float y);
   public:
     FrameSourceWarp(FrameSource *source, int d_fov);
     cv::UMat pull_frame();

@@ -11,43 +11,56 @@
 using namespace std;
 using namespace cv;
 
+Point2d FrameSourceWarp::mapPointToSource(int x, int y) {
+    // We start from the rectilinear (output) coordinates
+    int rel_x_r = x - this->center.x;
+    int rel_y_r = y - this->center.y;
+    float radius_r = sqrt(rel_x_r * rel_x_r + rel_y_r * rel_y_r) * this->max_radius_d / this->max_radius_d_pixels;
+
+    // We find the real angle of the light source from the center
+    float theta = atan(radius_r * this->max_radius_d);
+
+    // Convert theta to the appropriate radius for stereographic projection
+    float radius_s = 2 * tan(theta / 2);
+
+    float scale = radius_s / radius_r;
+    return Point2d(this->center.x + rel_x_r * scale, this->center.y + rel_y_r * scale);
+}
+
+Point2d FrameSourceWarp::mapPointFromSource(float x, float y) {
+    float rel_x_r = x - this->center.x;
+    float rel_y_r = y - this->center.y;
+    float radius_s = sqrt(rel_x_r * rel_x_r + rel_y_r * rel_y_r) * this->max_radius_d / this->max_radius_d_pixels;
+
+    float theta = 2 * atan(radius_s / 2);
+
+    float radius_r = tan(theta) / this->max_radius_d;
+
+    float scale = radius_r / radius_s;
+    return Point2d(this->center.x + rel_x_r * scale, this->center.y + rel_y_r * scale);
+}
+
 FrameSourceWarp::FrameSourceWarp(FrameSource *source, int d_fov) {
     this->source = source;
 
     UMat first_frame = source->peek_frame();
     int width = first_frame.cols;
-    int height = first_frame.rows;
+    int height = first_frame.rows * 2 / 3;
 
     // Center coordinates
-    float center_x = width / 2;
-    float center_y = height / 2;
-
-    // // Maximum input horizontal/vertical radius
-    // double max_radius_x_s = tan(v_fov_s / 2.f);
-    // double max_radius_y_s = tan(h_fov_s / 2.f);
+    this->center = Point(width / 2, height / 2);
 
     // Maximum input and output diagonal radius
-    double max_radius_d = tan(d_fov / 2.f);
-    double max_radius_d_pixels = sqrt(center_x * center_x + center_y * center_y);
+    this->max_radius_d = tan(d_fov / 2.f);
+    this->max_radius_d_pixels = sqrt(center.x * center.x + center.y * center.y);
 
     Mat map_x(height, width, CV_32FC1);
     Mat map_y(height, width, CV_32FC1);
     for(int y = 0; y < map_x.rows; y++) {
         for(int x = 0; x < map_x.cols; x++ ) {
-            // We start from the rectilinear (output) coordinates
-            int rel_x_r = x - center_x;
-            int rel_y_r = y - center_y;
-            float radius_r = sqrt(rel_x_r * rel_x_r + rel_y_r * rel_y_r) * max_radius_d / max_radius_d_pixels;
-
-            // We find the real angle of the light source from the center
-            float theta = atan(radius_r * max_radius_d);
-
-            // Convert theta to the appropriate radius for stereographic projection
-            float radius_s = 2 * tan(theta / 2);
-
-            float scale = radius_s / radius_r;
-            map_x.at<float>(y, x) = center_x + rel_x_r * scale;
-            map_y.at<float>(y, x) = center_y + rel_y_r * scale;
+            Point2d mapped = mapPointToSource(x, y);
+            map_x.at<float>(y, x) = mapped.x;
+            map_y.at<float>(y, x) = mapped.y;
         }
     }
     UMat map_1, map_2;
@@ -57,21 +70,8 @@ FrameSourceWarp::FrameSourceWarp(FrameSource *source, int d_fov) {
 }
 
 UMat FrameSourceWarp::warp_frame(UMat input_frame) {
-    UMat frame_bgr, frame_undistorted, frame_gray;
-    UMat last_frame_gray = this->last_frame_gray;
-    vector <Point2f> last_frame_corners = this->last_frame_corners;
-
-    // Undistort frame, convert to grayscale
-    cvtColor(input_frame, frame_bgr, COLOR_YUV2BGR_NV12);
-    remap(
-        frame_bgr,
-        frame_undistorted,
-        this->map_x,
-        this->map_y,
-        INTER_LINEAR
-    );
-    cvtColor(frame_undistorted, frame_gray, COLOR_BGR2GRAY);
-    // resize(frame_gray, frame_gray, Size(1280, 720));
+    // Create a UMat for only the luminance plane
+    UMat frame_gray(input_frame, Rect(0, 0, input_frame.cols, input_frame.rows * 2 / 3));
 
     // Find corners to track in current frame
     vector <Point2f> corners;
@@ -83,14 +83,15 @@ UMat FrameSourceWarp::warp_frame(UMat input_frame) {
     // for (size_t i = 0; i < corners.size(); i++) {
     //     drawMarker(frame_display, corners[i], Scalar(0, 0, 255), MARKER_TRIANGLE_UP);
     // }
-    // imshow("fast", frame_display);
-    // waitKey(20);
+    // return frame_display;
 
     // Keep the frame and the corners found in it for next time
+    UMat last_frame_gray = this->last_frame_gray;
+    vector <Point2f> last_frame_corners = this->last_frame_corners;
     this->last_frame_gray = frame_gray;
     this->last_frame_corners = corners;
     if (last_frame_gray.empty()) {
-        return frame_undistorted;
+        return frame_gray;
     }
 
     // If this is not the first frame, calculate optical flow
@@ -108,8 +109,12 @@ UMat FrameSourceWarp::warp_frame(UMat input_frame) {
     );
     for (size_t i=0; i < status.size(); i++) {
         if (status[i]) {
-            last_frame_corners_filtered.push_back(last_frame_corners[i]);
-            corners_filtered.push_back(corners[i]);
+            last_frame_corners_filtered.push_back(
+                this->mapPointFromSource(last_frame_corners[i].x, last_frame_corners[i].y)
+            );
+            corners_filtered.push_back(
+                this->mapPointFromSource(corners[i].x, corners[i].y)
+            );
         }
     }
 
@@ -126,13 +131,27 @@ UMat FrameSourceWarp::warp_frame(UMat input_frame) {
 
     this->transforms.push_back(homography.inv());
 
-    UMat stable = frame_gray.clone();
+    // convert to BGR
+    UMat frame_bgr;
+    cvtColor(input_frame, frame_bgr, COLOR_YUV2BGR_NV12);
+
+    // Convert the image into rectilinear projection
+    UMat frame_rectilinear;
+    remap(
+        frame_bgr,
+        frame_rectilinear,
+        this->map_x,
+        this->map_y,
+        INTER_LINEAR
+    );
+
+    UMat stable = frame_rectilinear.clone();
     UMat temp;
     Mat transform = this->transforms[this->transforms.size() - 1].clone();
     for (size_t i = this->transforms.size() - 2; i < this->transforms.size(); i--) {
         transform = transform * this->transforms[i];
     }
-    warpPerspective(stable, temp, transform, frame_gray.size());
+    warpPerspective(stable, temp, transform, frame_rectilinear.size());
     stable = temp;
 
     return stable;
