@@ -6,14 +6,15 @@
 #include <math.h>
 
 #include "hw_init.hpp"
+#include "AvFrameSourceProfile.hpp"
 #include "AvFrameSourceFileVaapi.hpp"
 #include "AvFrameSourceMapOpenCl.hpp"
+#include "FrameSourceProfile.hpp"
 #include "FrameSourceFfmpegOpenCl.hpp"
 #include "FrameSourceWarp.hpp"
 
 using namespace std;
 using namespace cv;
-using namespace std::chrono;
 
 #define DRM_DEVICE_PATH "/dev/dri/renderD128"
 
@@ -34,15 +35,27 @@ int main (int argc, char* argv[])
     AVBufferRef *opencl_device_ctx = create_opencl_context_from_vaapi(vaapi_device_ctx);
     init_opencv_from_opencl_context(opencl_device_ctx);
 
-    AvFrameSource *vaapi_source = new AvFrameSourceFileVaapi(argv[1], vaapi_device_ctx);
-    AvFrameSource *opencl_source = new AvFrameSourceMapOpenCl(vaapi_source, opencl_device_ctx);
-    FrameSource *ffmpeg_source = new FrameSourceFfmpegOpenCl(opencl_source);
+    AvFrameSource *vaapi_source = new AvFrameSourceProfile(
+        new AvFrameSourceFileVaapi(argv[1], vaapi_device_ctx),
+        "ffmpeg-vaapi"
+    );
+    AvFrameSource *opencl_source = new AvFrameSourceProfile(
+        new AvFrameSourceMapOpenCl(vaapi_source, opencl_device_ctx),
+        "ffmpeg-opencl"
+    );
+    FrameSource *ffmpeg_source = new FrameSourceProfile(
+        new FrameSourceFfmpegOpenCl(opencl_source),
+        "opencv-mapped"
+    );
 
     // Known field of view of the camera
     // int v_fov_s = 94.4 * M_PI / 180;
     // int h_fov_s = 122.6 * M_PI / 180;
     int d_fov = 149.2 * M_PI / 180;
-    FrameSource *warped_source = new FrameSourceWarp(ffmpeg_source, d_fov);
+    FrameSource *warped_source = new FrameSourceProfile(
+        new FrameSourceWarp(ffmpeg_source, d_fov),
+        "opencv-warped"
+    );
 
     UMat frame;
     while (true) {

@@ -18,8 +18,10 @@ display_image_sources = [
     'DisplayImage.cpp',
     'hw_init.cpp',
     'FrameSourceWarp.cpp',
+    'AvFrameSourceProfile.cpp',
     'AvFrameSourceFileVaapi.cpp',
     'AvFrameSourceMapOpenCl.cpp',
+    'FrameSourceProfile.cpp',
     'FrameSourceFfmpegOpenCl.cpp',
     'utils.cpp'
 ]
