@@ -2,6 +2,14 @@ extern "C" {
     #include <gpmf-parser/GPMF_parser.h>
 }
 
+class GyroFrame {
+    double start_ts;
+    double end_ts;
+    double roll;
+    double pitch;
+    double yaw;
+};
+
 // GPMF_ERR read_sample_data(GPMF_stream gs_stream, GPMF_SampleType sample_type, uint32_t *samples, uint32_t *elements, void **buffer, int *buffer_size) {
 //     int ret;
 //     *samples = GPMF_Repeat(&gs_stream);

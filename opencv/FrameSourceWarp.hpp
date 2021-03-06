@@ -9,14 +9,6 @@
 using namespace std;
 using namespace cv;
 
-class GyroFrame {
-    double start_ts;
-    double end_ts;
-    double roll;
-    double pitch;
-    double yaw;
-};
-
 /**
  * FrameSourceWarp is a video processor that accepts a stream of input video frames
  * and metadata and applies reprojection and stabilisation on them
@@ -28,7 +20,6 @@ class FrameSourceWarp: public FrameSource {
     UMat last_frame_gray;
     vector <Point2f> last_frame_corners;
     vector<Mat> transforms;
-    deque<GyroFrame> gyro_frames;
     cv::UMat warp_frame(UMat input_frame);
   public:
     FrameSourceWarp(FrameSource *source, int d_fov);
