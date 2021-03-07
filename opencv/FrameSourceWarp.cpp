@@ -11,6 +11,8 @@
 using namespace std;
 using namespace cv;
 
+const int INTERPOLATION = INTER_LINEAR;
+
 Point2d FrameSourceWarp::mapPointToSource(int x, int y) {
     // We start from the rectilinear (output) coordinates
     int rel_x_r = x - this->center.x;
@@ -142,7 +144,7 @@ UMat FrameSourceWarp::warp_frame(UMat input_frame) {
         frame_rectilinear,
         this->map_x,
         this->map_y,
-        INTER_LINEAR
+        INTERPOLATION
     );
 
     UMat stable = frame_rectilinear.clone();
@@ -151,7 +153,7 @@ UMat FrameSourceWarp::warp_frame(UMat input_frame) {
     for (size_t i = this->transforms.size() - 2; i < this->transforms.size(); i--) {
         transform = transform * this->transforms[i];
     }
-    warpPerspective(stable, temp, transform, frame_rectilinear.size());
+    warpPerspective(stable, temp, transform, frame_rectilinear.size(), INTERPOLATION);
     stable = temp;
 
     return stable;
