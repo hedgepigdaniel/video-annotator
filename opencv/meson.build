@@ -52,10 +52,10 @@ executable(
     install: true,
 )
 
-calibrate_camera_sources = ['CalibrateCamera.cpp']
+calibrate_camera_sources = ['camera_calibration/camera_calibration.cpp']
 
 executable(
-    'CalibrateCamera',
+    'camera_calibration',
     calibrate_camera_sources,
     dependencies: dependencies,
     install: true,
