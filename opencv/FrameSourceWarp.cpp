@@ -26,18 +26,34 @@ FrameSourceWarp::FrameSourceWarp(FrameSource *source) {
     camera_matrix.at<double>(0, 2) = (size.width - 1.) / 2;
     camera_matrix.at<double>(1, 2) = (size.height - 1.) / 2;
 
-    // Set field of view
-    camera_matrix.at<double>(0, 0) = size.width / (2 * atan ((122.6 / 2) * CV_PI / 180));
-    camera_matrix.at<double>(1, 1) = (size.height) / (2 * atan ((94.4 / 2) * CV_PI / 180));
-
-    // Measured values for GoPro Hero 4 Black with 4:3 "Wide" FOV setting and stabilisation disabled
-    camera_matrix.at<double>(0, 2) = 967.37;
-    camera_matrix.at<double>(1, 2) = 711.07;
-    camera_matrix.at<double>(0, 0) = 942.96;
-    camera_matrix.at<double>(1, 1) = 942.53;
-
     // Set zero distortion coefficients
     this->distortion_coefficients = Mat::zeros(4, 1, CV_64F);
+
+    // Set field of view
+    int mode = 1;
+    if (mode == 0) {
+        // Use published values from
+        // https://community.gopro.com/t5/en/HERO4-Field-of-View-FOV-Information/ta-p/390285
+        const int GOPRO_H4B_FOV_H_NOSTAB = 122.6;
+        const int GOPRO_H4B_FOV_V_NOSTAB = 94.4;
+
+        camera_matrix.at<double>(0, 0) = size.width /
+            (2 * atan ((GOPRO_H4B_FOV_H_NOSTAB / 2) * CV_PI / 180)); // 1171.95
+        camera_matrix.at<double>(1, 1) = size.height /
+            (2 * atan ((GOPRO_H4B_FOV_V_NOSTAB / 2) * CV_PI / 180)); // 1044.87
+    } else if (mode == 1) {
+        // Measured values for GoPro Hero 4 Black with 4:3 "Wide" FOV setting and stabilisation disabled
+        camera_matrix.at<double>(0, 2) = 967.37;
+        camera_matrix.at<double>(1, 2) = 711.07;
+        camera_matrix.at<double>(0, 0) = 942.96;
+        camera_matrix.at<double>(1, 1) = 942.53;
+    } else if (mode == 2) {
+        // Measured values for GoPro Hero 4 Black with 4:3 "Wide" FOV setting and stabilisation enabled
+        camera_matrix.at<double>(0, 2) = 965.90;
+        camera_matrix.at<double>(1, 2) = 712.94;
+        camera_matrix.at<double>(0, 0) = 1045.58;
+        camera_matrix.at<double>(1, 1) = 1045.64;
+    }
 
     vector<Point2d> extreme_points;
     fisheye::undistortPoints(
