@@ -13,62 +13,77 @@ using namespace cv;
 
 const int INTERPOLATION = INTER_LINEAR;
 
-Point2d FrameSourceWarp::mapPointToSource(int x, int y) {
-    // We start from the rectilinear (output) coordinates
-    int rel_x_r = x - this->center.x;
-    int rel_y_r = y - this->center.y;
-    float radius_r = sqrt(rel_x_r * rel_x_r + rel_y_r * rel_y_r) * this->max_radius_d / this->max_radius_d_pixels;
-
-    // We find the real angle of the light source from the center
-    float theta = atan(radius_r * this->max_radius_d);
-
-    // Convert theta to the appropriate radius for stereographic projection
-    float radius_s = 2 * tan(theta / 2);
-
-    float scale = radius_s / radius_r;
-    return Point2d(this->center.x + rel_x_r * scale, this->center.y + rel_y_r * scale);
-}
-
-Point2d FrameSourceWarp::mapPointFromSource(float x, float y) {
-    float rel_x_r = x - this->center.x;
-    float rel_y_r = y - this->center.y;
-    float radius_s = sqrt(rel_x_r * rel_x_r + rel_y_r * rel_y_r) * this->max_radius_d / this->max_radius_d_pixels;
-
-    float theta = 2 * atan(radius_s / 2);
-
-    float radius_r = tan(theta) / this->max_radius_d;
-
-    float scale = radius_r / radius_s;
-    return Point2d(this->center.x + rel_x_r * scale, this->center.y + rel_y_r * scale);
-}
-
-FrameSourceWarp::FrameSourceWarp(FrameSource *source, int d_fov) {
+FrameSourceWarp::FrameSourceWarp(FrameSource *source) {
     this->source = source;
 
-    UMat first_frame = source->peek_frame();
-    int width = first_frame.cols;
-    int height = first_frame.rows * 2 / 3;
+    UMat first_frame = this->source->peek_frame();
+    Size size = Size(first_frame.cols, first_frame.rows * 2 / 3);
 
-    // Center coordinates
-    this->center = Point(width / 2, height / 2);
+    Mat camera_matrix = Mat::eye(3, 3, CV_64F);
+    this->camera_matrix = camera_matrix;
 
-    // Maximum input and output diagonal radius
-    this->max_radius_d = tan(d_fov / 2.f);
-    this->max_radius_d_pixels = sqrt(center.x * center.x + center.y * center.y);
+    // Set principal point in the centre
+    camera_matrix.at<double>(0, 2) = (size.width - 1.) / 2;
+    camera_matrix.at<double>(1, 2) = (size.height - 1.) / 2;
 
-    Mat map_x(height, width, CV_32FC1);
-    Mat map_y(height, width, CV_32FC1);
-    for(int y = 0; y < map_x.rows; y++) {
-        for(int x = 0; x < map_x.cols; x++ ) {
-            Point2d mapped = mapPointToSource(x, y);
-            map_x.at<float>(y, x) = mapped.x;
-            map_y.at<float>(y, x) = mapped.y;
-        }
-    }
-    UMat map_1, map_2;
-    convertMaps(map_x, map_y, map_1, map_2, CV_16SC2);
-    this->map_x = map_1;
-    this->map_y = map_2;
+    // Set field of view
+    camera_matrix.at<double>(0, 0) = size.width / (2 * atan ((122.6 / 2) * CV_PI / 180));
+    camera_matrix.at<double>(1, 1) = (size.height) / (2 * atan ((94.4 / 2) * CV_PI / 180));
+
+    // Measured values for GoPro Hero 4 Black with 4:3 "Wide" FOV setting and stabilisation disabled
+    camera_matrix.at<double>(0, 2) = 967.37;
+    camera_matrix.at<double>(1, 2) = 711.07;
+    camera_matrix.at<double>(0, 0) = 942.96;
+    camera_matrix.at<double>(1, 1) = 942.53;
+
+    // Set zero distortion coefficients
+    this->distortion_coefficients = Mat::zeros(4, 1, CV_64F);
+
+    vector<Point2d> extreme_points;
+    fisheye::undistortPoints(
+        vector<Point2d>({
+            // corners
+            Point2d(0, 0),
+            Point2d(0, size.height),
+            Point2d(size.width, 0),
+            Point2d(size.width, size.height),
+
+            // midpoint of edges
+            Point2d(size.width / 2, 0),
+            Point2d(size.width, size.height / 2),
+            Point2d(size.width / 2, size.height),
+            Point2d(0, size.height / 2),
+        }),
+        extreme_points,
+        this->camera_matrix,
+        this->distortion_coefficients
+    );
+    auto compare_x = [](const Point2d &point1, const Point2d &point2) { return point1.x < point2.x; };
+    auto compare_y = [](const Point2d &point1, const Point2d &point2) { return point1.y < point2.y; };
+    double max_x = max_element( begin(extreme_points), end(extreme_points), compare_x)->x;
+    double min_x = min_element( begin(extreme_points), end(extreme_points), compare_x)->x;
+    double max_y = max_element( begin(extreme_points), end(extreme_points), compare_y)->y;
+    double min_y = min_element( begin(extreme_points), end(extreme_points), compare_y)->y;
+
+    double scale = 200;
+
+    this->output_size = Size(scale * (max_x - min_x), scale * (max_y - min_y));
+    this->output_camera_matrix = Matx33d::eye();
+    this->output_camera_matrix(0, 0) = scale;
+    this->output_camera_matrix(1, 1) = scale;
+    this->output_camera_matrix(0, 2) = scale * (max_x - min_x) / 2;
+    this->output_camera_matrix(1, 2) = scale * (max_y - min_y) / 2;
+
+    fisheye::initUndistortRectifyMap(
+        camera_matrix,
+        this->distortion_coefficients,
+        Mat::eye(3, 3, CV_64F),
+        this->output_camera_matrix,
+        this->output_size,
+        CV_16SC2,
+        this->camera_map_1,
+        this->camera_map_2
+    );
 }
 
 UMat FrameSourceWarp::warp_frame(UMat input_frame) {
@@ -111,52 +126,63 @@ UMat FrameSourceWarp::warp_frame(UMat input_frame) {
     );
     for (size_t i=0; i < status.size(); i++) {
         if (status[i]) {
-            last_frame_corners_filtered.push_back(
-                this->mapPointFromSource(last_frame_corners[i].x, last_frame_corners[i].y)
-            );
-            corners_filtered.push_back(
-                this->mapPointFromSource(corners[i].x, corners[i].y)
-            );
+            last_frame_corners_filtered.push_back(last_frame_corners[i]);
+            corners_filtered.push_back(corners[i]);
         }
     }
 
-    Mat homography = findHomography(last_frame_corners_filtered, corners_filtered, RANSAC);
+    fisheye::undistortPoints(
+        last_frame_corners_filtered,
+        last_frame_corners_filtered,
+        this->camera_matrix,
+        this->distortion_coefficients,
+        Matx33d::eye(),
+        this->output_camera_matrix
+    );
+    fisheye::undistortPoints(
+        corners_filtered,
+        corners_filtered,
+        this->camera_matrix,
+        this->distortion_coefficients,
+        Matx33d::eye(),
+        this->output_camera_matrix
+    );
 
-    std::cerr << "Homography: \n" << homography << "\n\n";
+    // Find camera movement since last frame
+    Mat frame_movement = findHomography(last_frame_corners_filtered, corners_filtered, RANSAC);
+    // std::cerr << "frame_movement: \n" << frame_movement << "\n\n";
 
     // decompose homography
-    double dx = homography.at<double>(0,2);
-    double dy = homography.at<double>(1,2);
-    double da = atan2(homography.at<double>(1,0), homography.at<double>(0,0));
+    double dx = frame_movement.at<double>(0,2);
+    double dy = frame_movement.at<double>(1,2);
+    double da = atan2(frame_movement.at<double>(1,0), frame_movement.at<double>(0,0));
+    fprintf(stderr, "frame_movement: (%+.1f, %+.1f) %+.1f degrees\n", dx, dy, da * 180 / M_PI);
+    this->frame_movements.push_back(frame_movement.inv());
 
-    fprintf(stderr, "homography: (%+.1f, %+.1f) %+.1f degrees\n", dx, dy, da * 180 / M_PI);
-
-    this->transforms.push_back(homography.inv());
+    // Find the accumulated camera movement since the beginning
+    Mat accumulated_movement = this->frame_movements[this->frame_movements.size() - 1].clone();
+    for (size_t i = this->frame_movements.size() - 2; i < this->frame_movements.size(); i--) {
+        accumulated_movement = accumulated_movement * this->frame_movements[i];
+    }
+    dx = frame_movement.at<double>(0,2);
+    dy = frame_movement.at<double>(1,2);
+    da = atan2(frame_movement.at<double>(1,0), frame_movement.at<double>(0,0));
+    fprintf(stderr, "accumulated_movement: (%+.1f, %+.1f) %+.1f degrees\n", dx, dy, da * 180 / M_PI);
 
     // convert to BGR
     UMat frame_bgr;
     cvtColor(input_frame, frame_bgr, COLOR_YUV2BGR_NV12);
 
-    // Convert the image into rectilinear projection
+    // Change projection
     UMat frame_rectilinear;
-    remap(
-        frame_bgr,
-        frame_rectilinear,
-        this->map_x,
-        this->map_y,
-        INTERPOLATION
-    );
+    remap(frame_bgr, frame_rectilinear, this->camera_map_1, this->camera_map_2, INTERPOLATION);
 
-    UMat stable = frame_rectilinear.clone();
-    UMat temp;
-    Mat transform = this->transforms[this->transforms.size() - 1].clone();
-    for (size_t i = this->transforms.size() - 2; i < this->transforms.size(); i--) {
-        transform = transform * this->transforms[i];
-    }
-    warpPerspective(stable, temp, transform, frame_rectilinear.size(), INTERPOLATION);
-    stable = temp;
+    // Apply motion stabilisation
+    UMat frame_output;
+    cerr << "warping with " << accumulated_movement << "\n";
+    warpPerspective(frame_rectilinear, frame_output, accumulated_movement, frame_rectilinear.size(), INTERPOLATION);
 
-    return stable;
+    return frame_output;
 }
 
 UMat FrameSourceWarp::pull_frame() {

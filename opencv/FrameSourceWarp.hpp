@@ -15,20 +15,19 @@ using namespace cv;
  */
 class FrameSourceWarp: public FrameSource {
     FrameSource *source;
-    UMat map_x;
-    UMat map_y;
     UMat last_frame_gray;
     vector <Point2f> last_frame_corners;
-    vector<Mat> transforms;
-    cv::UMat warp_frame(UMat input_frame);
+    vector<Mat> frame_movements;
+    Mat camera_matrix;
+    Mat distortion_coefficients;
+    Mat camera_map_1;
+    Mat camera_map_2;
+    Matx33d output_camera_matrix;
+    Size output_size;
 
-    Point2d center;
-    double max_radius_d;
-    double max_radius_d_pixels;
-    Point2d mapPointToSource(int x, int y);
-    Point2d mapPointFromSource(float x, float y);
+    cv::UMat warp_frame(UMat input_frame);
   public:
-    FrameSourceWarp(FrameSource *source, int d_fov);
+    FrameSourceWarp(FrameSource *source);
     cv::UMat pull_frame();
     cv::UMat peek_frame();
 };

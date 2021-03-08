@@ -51,9 +51,9 @@ int main (int argc, char* argv[])
     // Known field of view of the camera
     // int v_fov_s = 94.4 * M_PI / 180;
     // int h_fov_s = 122.6 * M_PI / 180;
-    int d_fov = 149.2 * M_PI / 180;
+    // int d_fov = 149.2 * M_PI / 180;
     FrameSource *warped_source = new FrameSourceProfile(
-        new FrameSourceWarp(ffmpeg_source, d_fov),
+        new FrameSourceWarp(ffmpeg_source),
         "opencv-warped"
     );
 
