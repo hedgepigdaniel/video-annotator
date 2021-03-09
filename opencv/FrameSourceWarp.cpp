@@ -226,15 +226,19 @@ Mat FrameSourceWarp::get_camera_movement(vector<Point2f> points_prev, vector<Poi
             scale
         ));
     }
-    bool success = solvePnPRansac(
-        last_frame_corner_coordinates,
-        corners_output,
-        m_output_camera.matrix,
-        m_output_camera.distortion_coefficients,
-        rotation,
-        translation
-    );
-    cerr << "success: " << success << "\n";
+    try {
+        solvePnPRansac(
+            last_frame_corner_coordinates,
+            corners_output,
+            m_output_camera.matrix,
+            m_output_camera.distortion_coefficients,
+            rotation,
+            translation
+        );
+    } catch (cv::Exception &e) {
+        cerr << "solvePnPRansac failed!" << endl;
+        return Mat::eye(3, 3, CV_64F);
+    }
     cerr << "rotation: " << rotation << "\n";
     cerr << "translation: " << translation << "\n";
     cerr << endl;
