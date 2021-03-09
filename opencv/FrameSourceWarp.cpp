@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <math.h>
+#include <cstdlib>
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/calib3d.hpp>
@@ -216,10 +217,13 @@ Mat FrameSourceWarp::get_camera_movement(vector<Point2f> points_prev, vector<Poi
     Mat rotation, translation;
     vector<Point3d> last_frame_corner_coordinates;
     for (size_t i = 0; i < prev_corners_identity.size(); ++i) {
+        // Add noise to change the depth of each point. This prevents
+        // the detection of translations, but doesn't affect rotations.
+        double scale = rand() * 1. / RAND_MAX;
         last_frame_corner_coordinates.push_back(Point3d(
-            prev_corners_identity[i].x,
-            prev_corners_identity[i].y,
-            1
+            prev_corners_identity[i].x * scale,
+            prev_corners_identity[i].y * scale,
+            scale
         ));
     }
     bool success = solvePnPRansac(
