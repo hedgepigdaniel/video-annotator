@@ -60,3 +60,13 @@ executable(
     dependencies: dependencies,
     install: true,
 )
+
+
+kalman_sources = ['kalman/kalman.cpp']
+
+executable(
+    'kalman',
+    kalman_sources,
+    dependencies: dependencies,
+    install: true,
+)
