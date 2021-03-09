@@ -39,18 +39,30 @@ Camera get_preset_camera(CameraPreset preset, Size input_size) {
             break;
         case GOPRO_H4B_WIDE43_MEASURED:
             // Measured values for GoPro Hero 4 Black with 4:3 "Wide" FOV setting and stabilisation disabled
-            camera_matrix.at<double>(0, 2) = 967.37;
-            camera_matrix.at<double>(1, 2) = 711.07;
-            camera_matrix.at<double>(0, 0) = 942.96;
-            camera_matrix.at<double>(1, 1) = 942.53;
+            camera_matrix.at<double>(0, 2) = 967.37 * input_size.width / 1920;
+            camera_matrix.at<double>(1, 2) = 711.07 * input_size.height / 1440;
+            camera_matrix.at<double>(0, 0) = 942.96 * input_size.height / 1440;
+            camera_matrix.at<double>(1, 1) = 942.53 * input_size.height / 1440;
             break;
         case GOPRO_H4B_WIDE43_MEASURED_STABILISATION:
             // Measured values for GoPro Hero 4 Black with 4:3 "Wide" FOV setting and stabilisation enabled
-            camera_matrix.at<double>(0, 2) = 965.90;
-            camera_matrix.at<double>(1, 2) = 712.94;
-            camera_matrix.at<double>(0, 0) = 1045.58;
-            camera_matrix.at<double>(1, 1) = 1045.64;
+            camera_matrix.at<double>(0, 2) = 965.90 * input_size.width / 1920;
+            camera_matrix.at<double>(1, 2) = 712.94 * input_size.height / 1440;
+            camera_matrix.at<double>(0, 0) = 1045.58 * input_size.height / 1440;
+            camera_matrix.at<double>(1, 1) = 1045.64 * input_size.height / 1440;
             break;
+        case GOPRO_H4B_WIDE169_MEASURED:
+            // Measured values for GoPro Hero 4 Black with 16 "Wide" FOV setting and stabilisation disabled
+            camera_matrix.at<double>(0, 2) = 1361.80 * input_size.width / 2704;
+            camera_matrix.at<double>(1, 2) = 745.19 * input_size.height / 1520;
+            camera_matrix.at<double>(0, 0) = 1392.49 * input_size.height / 1520;
+            camera_matrix.at<double>(1, 1) = 1383.47 * input_size.height / 1520;
+        case GOPRO_H4B_WIDE169_MEASURED_STABILISATION:
+            // Measured values for GoPro Hero 4 Black with 16 "Wide" FOV setting and stabilisation enabled
+            camera_matrix.at<double>(0, 2) = 1357.49 * input_size.width / 2704;
+            camera_matrix.at<double>(1, 2) = 736.74 * input_size.height / 1520;
+            camera_matrix.at<double>(0, 0) = 1626.67 * input_size.height / 1520;
+            camera_matrix.at<double>(1, 1) = 1619.46 * input_size.height / 1520;
     }
 
     Camera camera;
