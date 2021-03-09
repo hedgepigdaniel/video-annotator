@@ -123,7 +123,7 @@ FrameSourceWarp::FrameSourceWarp(std::shared_ptr<FrameSource> source, CameraPres
         input_camera,
         Size(first_frame.cols, first_frame.rows * 2 / 3)
     );
-    m_output_camera = get_output_camera(m_input_camera, 200);
+    m_output_camera = get_output_camera(m_input_camera, m_input_camera.size.width / 5);
 
     fisheye::initUndistortRectifyMap(
         m_input_camera.matrix,
