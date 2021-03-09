@@ -34,13 +34,7 @@ AVFrame* AvFrameSourceMapOpenCl::opencl_frame_from_vaapi_frame(AVFrame *vaapi_fr
         throw err;
     }
 
-    ocl_frame->hw_frames_ctx = av_buffer_ref(ocl_hw_frames_ctx);
-    if (ocl_frame->hw_frames_ctx == NULL) {
-        err = AVERROR(ENOMEM);
-        cerr << "Failed to allocate reference to hw frames context:" << errString(err) << "\n";
-        throw err;
-    }
-
+    ocl_frame->hw_frames_ctx = ocl_hw_frames_ctx;
     ocl_frame->format = AV_PIX_FMT_OPENCL;
 
     err = av_hwframe_map(ocl_frame, vaapi_frame, AV_HWFRAME_MAP_READ);

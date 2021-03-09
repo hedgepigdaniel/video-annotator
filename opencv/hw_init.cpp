@@ -73,9 +73,9 @@ void init_opencv_from_opencl_context(AVBufferRef *ocl_device_ctx) {
     AVOpenCLDeviceContext *ocl_device_ocl_ctx;
     ocl_hw_device_ctx = (AVHWDeviceContext *) ocl_device_ctx->data;
     ocl_device_ocl_ctx = (AVOpenCLDeviceContext *) ocl_hw_device_ctx->hwctx;
-    cl_context_properties *props = NULL;
+    vector<cl_context_properties> props;
     cl_platform_id platform = NULL;
-    char *platform_name = NULL;
+    vector<char> platform_name;
     size_t param_value_size = 0;
     err = clGetContextInfo(
         ocl_device_ocl_ctx->context,
@@ -92,16 +92,12 @@ void init_opencv_from_opencl_context(AVBufferRef *ocl_device_ctx) {
         std::cerr << "clGetContextInfo returned size 0\n";
         throw 1;
     }
-    props = (cl_context_properties *) malloc(param_value_size);
-    if (props == NULL) {
-        std::cerr << "Failed to alloc props 0\n";
-        throw AVERROR(ENOMEM);
-    }
+    props.resize(param_value_size);
     err = clGetContextInfo(
         ocl_device_ocl_ctx->context,
         CL_CONTEXT_PROPERTIES,
         param_value_size,
-        props,
+        props.data(),
         NULL
     );
     if (err != CL_SUCCESS) {
@@ -134,16 +130,12 @@ void init_opencv_from_opencl_context(AVBufferRef *ocl_device_ctx) {
         std::cerr << "clGetPlatformInfo returned 0 size for name\n";
         throw 1;
     }
-    platform_name = (char *) malloc(param_value_size);
-    if (platform_name == NULL) {
-        std::cerr << "Failed to malloc platform_name\n";
-        throw AVERROR(ENOMEM);
-    }
+    platform_name.resize(param_value_size);
     err = clGetPlatformInfo(
         platform,
         CL_PLATFORM_NAME,
         param_value_size,
-        platform_name,
+        platform_name.data(),
         NULL
     );
     if (err != CL_SUCCESS) {
@@ -152,12 +144,12 @@ void init_opencv_from_opencl_context(AVBufferRef *ocl_device_ctx) {
     }
 
     std::cerr << "Initialising OpenCV OpenCL context with platform \"" <<
-        platform_name <<
+        string(platform_name.begin(), platform_name.end()) <<
         "\"\n";
 
     ocl::Context::getDefault(false);
     ocl::attachContext(
-        platform_name,
+        platform_name.data(),
         platform,
         ocl_device_ocl_ctx->context,
         ocl_device_ocl_ctx->device_id
