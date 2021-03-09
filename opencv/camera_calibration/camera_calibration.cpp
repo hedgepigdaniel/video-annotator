@@ -417,9 +417,12 @@ int main(int argc, char* argv[])
         if( mode == CALIBRATED && s.showUndistorsed )
         {
             Mat temp = view.clone();
-            if (s.useFisheye)
-              cv::fisheye::undistortImage(temp, view, cameraMatrix, distCoeffs);
-            else
+            if (s.useFisheye) {
+                Mat newCamMat;
+                fisheye::estimateNewCameraMatrixForUndistortRectify(cameraMatrix, distCoeffs, imageSize,
+                                                                    Matx33d::eye(), newCamMat, 1);
+                cv::fisheye::undistortImage(temp, view, cameraMatrix, distCoeffs, newCamMat);
+            } else
               undistort(temp, view, cameraMatrix, distCoeffs);
         }
         //! [output_undistorted]
@@ -547,7 +550,7 @@ static bool runCalibration( Settings& s, Size& imageSize, Mat& cameraMatrix, Mat
 {
     //! [fixed_aspect]
     cameraMatrix = Mat::eye(3, 3, CV_64F);
-    if( s.flag & CALIB_FIX_ASPECT_RATIO )
+    if( !s.useFisheye && s.flag & CALIB_FIX_ASPECT_RATIO )
         cameraMatrix.at<double>(0,0) = s.aspectRatio;
     //! [fixed_aspect]
     if (s.useFisheye) {
@@ -630,7 +633,7 @@ static void saveCameraParams( Settings& s, Size& imageSize, Mat& cameraMatrix, M
     fs << "board_height" << s.boardSize.height;
     fs << "square_size" << s.squareSize;
 
-    if( s.flag & CALIB_FIX_ASPECT_RATIO )
+    if( !s.useFisheye && s.flag & CALIB_FIX_ASPECT_RATIO )
         fs << "fix_aspect_ratio" << s.aspectRatio;
 
     if (s.flag)

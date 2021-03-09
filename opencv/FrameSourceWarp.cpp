@@ -13,66 +13,75 @@ using namespace cv;
 
 const int INTERPOLATION = INTER_LINEAR;
 
-FrameSourceWarp::FrameSourceWarp(FrameSource *source) {
-    this->source = source;
+// Published values from
+// https://community.gopro.com/t5/en/HERO4-Field-of-View-FOV-Information/ta-p/390285
+const int GOPRO_H4B_FOV_H_NOSTAB = 122.6;
+const int GOPRO_H4B_FOV_V_NOSTAB = 94.4;
 
-    UMat first_frame = this->source->peek_frame();
-    Size size = Size(first_frame.cols, first_frame.rows * 2 / 3);
-
+Camera get_preset_camera(CameraPreset preset, Size input_size) {
     Mat camera_matrix = Mat::eye(3, 3, CV_64F);
-    this->camera_matrix = camera_matrix;
 
-    // Set principal point in the centre
-    camera_matrix.at<double>(0, 2) = (size.width - 1.) / 2;
-    camera_matrix.at<double>(1, 2) = (size.height - 1.) / 2;
+    // Default: principal point is at the centre
+    camera_matrix.at<double>(0, 2) = (input_size.width - 1.) / 2;
+    camera_matrix.at<double>(1, 2) = (input_size.height - 1.) / 2;
 
-    // Set zero distortion coefficients
-    this->distortion_coefficients = Mat::zeros(4, 1, CV_64F);
+    // Default: zero distortion coefficients
+    Mat distortion_coefficients = Mat::zeros(4, 1, CV_64F);
 
-    // Set field of view
-    int mode = 1;
-    if (mode == 0) {
-        // Use published values from
-        // https://community.gopro.com/t5/en/HERO4-Field-of-View-FOV-Information/ta-p/390285
-        const int GOPRO_H4B_FOV_H_NOSTAB = 122.6;
-        const int GOPRO_H4B_FOV_V_NOSTAB = 94.4;
-
-        camera_matrix.at<double>(0, 0) = size.width /
-            (2 * atan ((GOPRO_H4B_FOV_H_NOSTAB / 2) * CV_PI / 180)); // 1171.95
-        camera_matrix.at<double>(1, 1) = size.height /
-            (2 * atan ((GOPRO_H4B_FOV_V_NOSTAB / 2) * CV_PI / 180)); // 1044.87
-    } else if (mode == 1) {
-        // Measured values for GoPro Hero 4 Black with 4:3 "Wide" FOV setting and stabilisation disabled
-        camera_matrix.at<double>(0, 2) = 967.37;
-        camera_matrix.at<double>(1, 2) = 711.07;
-        camera_matrix.at<double>(0, 0) = 942.96;
-        camera_matrix.at<double>(1, 1) = 942.53;
-    } else if (mode == 2) {
-        // Measured values for GoPro Hero 4 Black with 4:3 "Wide" FOV setting and stabilisation enabled
-        camera_matrix.at<double>(0, 2) = 965.90;
-        camera_matrix.at<double>(1, 2) = 712.94;
-        camera_matrix.at<double>(0, 0) = 1045.58;
-        camera_matrix.at<double>(1, 1) = 1045.64;
+    switch (preset) {
+        case GOPRO_H4B_WIDE43_PUBLISHED:
+            camera_matrix.at<double>(0, 2) = (input_size.width - 1.) / 2;
+            camera_matrix.at<double>(1, 2) = (input_size.height - 1.) / 2;
+            camera_matrix.at<double>(0, 0) = input_size.width /
+                (2 * atan ((GOPRO_H4B_FOV_H_NOSTAB / 2) * CV_PI / 180)); // 1171.95
+            camera_matrix.at<double>(1, 1) = input_size.height /
+                (2 * atan ((GOPRO_H4B_FOV_V_NOSTAB / 2) * CV_PI / 180)); // 1044.87
+            break;
+        case GOPRO_H4B_WIDE43_MEASURED:
+            // Measured values for GoPro Hero 4 Black with 4:3 "Wide" FOV setting and stabilisation disabled
+            camera_matrix.at<double>(0, 2) = 967.37;
+            camera_matrix.at<double>(1, 2) = 711.07;
+            camera_matrix.at<double>(0, 0) = 942.96;
+            camera_matrix.at<double>(1, 1) = 942.53;
+            break;
+        case GOPRO_H4B_WIDE43_MEASURED_STABILISATION:
+            // Measured values for GoPro Hero 4 Black with 4:3 "Wide" FOV setting and stabilisation enabled
+            camera_matrix.at<double>(0, 2) = 965.90;
+            camera_matrix.at<double>(1, 2) = 712.94;
+            camera_matrix.at<double>(0, 0) = 1045.58;
+            camera_matrix.at<double>(1, 1) = 1045.64;
+            break;
     }
+
+    Camera camera;
+    camera.model = FISHEYE;
+    camera.matrix = camera_matrix;
+    camera.distortion_coefficients = distortion_coefficients;
+    camera.size = input_size;
+    return camera;
+}
+
+Camera get_output_camera(Camera input_camera, double scale) {
+    Size input_size = input_camera.size;
 
     vector<Point2d> extreme_points;
     fisheye::undistortPoints(
         vector<Point2d>({
             // corners
             Point2d(0, 0),
-            Point2d(0, size.height),
-            Point2d(size.width, 0),
-            Point2d(size.width, size.height),
+            Point2d(0, input_size.height),
+            Point2d(input_size.width, 0),
+            Point2d(input_size.width, input_size.height),
 
             // midpoint of edges
-            Point2d(size.width / 2, 0),
-            Point2d(size.width, size.height / 2),
-            Point2d(size.width / 2, size.height),
-            Point2d(0, size.height / 2),
+            Point2d(input_size.width / 2, 0),
+            Point2d(input_size.width, input_size.height / 2),
+            Point2d(input_size.width / 2, input_size.height),
+            Point2d(0, input_size.height / 2),
         }),
         extreme_points,
-        this->camera_matrix,
-        this->distortion_coefficients
+        input_camera.matrix,
+        input_camera.distortion_coefficients
     );
     auto compare_x = [](const Point2d &point1, const Point2d &point2) { return point1.x < point2.x; };
     auto compare_y = [](const Point2d &point1, const Point2d &point2) { return point1.y < point2.y; };
@@ -81,34 +90,43 @@ FrameSourceWarp::FrameSourceWarp(FrameSource *source) {
     double max_y = max_element( begin(extreme_points), end(extreme_points), compare_y)->y;
     double min_y = min_element( begin(extreme_points), end(extreme_points), compare_y)->y;
 
-    double scale = 200;
+    Matx33d matrix = Matx33d::eye();
+    matrix(0, 0) = scale;
+    matrix(1, 1) = scale;
+    matrix(0, 2) = scale * (max_x - min_x) / 2;
+    matrix(1, 2) = scale * (max_y - min_y) / 2;
 
-    this->output_size = Size(scale * (max_x - min_x), scale * (max_y - min_y));
-    this->output_camera_matrix = Matx33d::eye();
-    this->output_camera_matrix(0, 0) = scale;
-    this->output_camera_matrix(1, 1) = scale;
-    this->output_camera_matrix(0, 2) = scale * (max_x - min_x) / 2;
-    this->output_camera_matrix(1, 2) = scale * (max_y - min_y) / 2;
+    Camera camera;
+    camera.model = RECTILINEAR;
+    camera.matrix = matrix;
+    camera.distortion_coefficients = Mat::zeros(4, 1, CV_64F);
+    camera.size = Size(scale * (max_x - min_x), scale * (max_y - min_y));
+    return camera;
+}
+
+FrameSourceWarp::FrameSourceWarp(FrameSource *source, CameraPreset input_camera): m_source(source) {
+    UMat first_frame = m_source->peek_frame();
+    m_input_camera = get_preset_camera(
+        input_camera,
+        Size(first_frame.cols, first_frame.rows * 2 / 3)
+    );
+    m_output_camera = get_output_camera(m_input_camera, 200);
 
     fisheye::initUndistortRectifyMap(
-        camera_matrix,
-        this->distortion_coefficients,
+        m_input_camera.matrix,
+        m_input_camera.distortion_coefficients,
         Mat::eye(3, 3, CV_64F),
-        this->output_camera_matrix,
-        this->output_size,
+        m_output_camera.matrix,
+        m_output_camera.size,
         CV_16SC2,
-        this->camera_map_1,
-        this->camera_map_2
+        m_camera_map_1,
+        m_camera_map_2
     );
 }
 
-UMat FrameSourceWarp::warp_frame(UMat input_frame) {
-    // Create a UMat for only the luminance plane
-    UMat frame_gray(input_frame, Rect(0, 0, input_frame.cols, input_frame.rows * 2 / 3));
-
-    // Find corners to track in current frame
+vector<Point2f> find_corners(UMat image) {
     vector <Point2f> corners;
-    goodFeaturesToTrack(frame_gray, corners, 200, 0.01, 30);
+    goodFeaturesToTrack(image, corners, 200, 0.01, 30);
     std::cerr << "Found " << corners.size() << " corners\n";
 
     // // Display corners
@@ -118,93 +136,150 @@ UMat FrameSourceWarp::warp_frame(UMat input_frame) {
     // }
     // return frame_display;
 
-    // Keep the frame and the corners found in it for next time
-    UMat last_frame_gray = this->last_frame_gray;
-    vector <Point2f> last_frame_corners = this->last_frame_corners;
-    this->last_frame_gray = frame_gray;
-    this->last_frame_corners = corners;
-    if (last_frame_gray.empty()) {
-        return frame_gray;
-    }
+    return corners;
+}
 
-    // If this is not the first frame, calculate optical flow
-    vector <Point2f> corners_filtered, last_frame_corners_filtered;
+pair<vector<Point2f>, vector<Point2f>> find_point_pairs(
+    UMat prev_frame,
+    UMat current_frame,
+    vector<Point2f> prev_corners
+) {
+    // Given a set of points in a previous frame, calculate optical flow to the current frame
+    vector <Point2f> current_corners_maybe, corners_filtered, last_frame_corners_filtered;
     vector <uchar> status;
     vector <float> err;
 
     calcOpticalFlowPyrLK(
-        last_frame_gray,
-        frame_gray,
-        last_frame_corners,
-        corners,
+        prev_frame,
+        current_frame,
+        prev_corners,
+        current_corners_maybe,
         status,
         err
     );
-    for (size_t i=0; i < status.size(); i++) {
+
+    // Return point pairs for which optical flow was found
+    vector<Point2f> prev_points, current_points;
+    for (size_t i = 0; i < status.size(); i++) {
         if (status[i]) {
-            last_frame_corners_filtered.push_back(last_frame_corners[i]);
-            corners_filtered.push_back(corners[i]);
+            prev_points.push_back(prev_corners[i]);
+            current_points.push_back(current_corners_maybe[i]);
         }
     }
+    return pair<vector<Point2f>, vector<Point2f>>(prev_points, current_points);
+}
 
-    fisheye::undistortPoints(
-        last_frame_corners_filtered,
-        last_frame_corners_filtered,
-        this->camera_matrix,
-        this->distortion_coefficients,
-        Matx33d::eye(),
-        this->output_camera_matrix
+UMat FrameSourceWarp::normalise_projection(UMat input_camera_frame) {
+    UMat output_camera_frame;
+    remap(
+        input_camera_frame,
+        output_camera_frame,
+        m_camera_map_1,
+        m_camera_map_2,
+        INTERPOLATION
     );
+    return output_camera_frame;
+}
+
+Mat FrameSourceWarp::get_camera_movement(vector<Point2f> points_prev, vector<Point2f> points_current) {
+    vector<Point2f> corners_output;
     fisheye::undistortPoints(
-        corners_filtered,
-        corners_filtered,
-        this->camera_matrix,
-        this->distortion_coefficients,
+        points_current,
+        corners_output,
+        m_input_camera.matrix,
+        m_input_camera.distortion_coefficients,
         Matx33d::eye(),
-        this->output_camera_matrix
+        m_output_camera.matrix
+        // No output distortion coefficients...?
     );
 
-    // Find camera movement since last frame
-    Mat frame_movement = findHomography(last_frame_corners_filtered, corners_filtered, RANSAC);
-    // std::cerr << "frame_movement: \n" << frame_movement << "\n\n";
+    vector<Point2f> prev_corners_identity;
+    fisheye::undistortPoints(
+        points_prev,
+        prev_corners_identity,
+        m_input_camera.matrix,
+        m_input_camera.distortion_coefficients
+    );
 
-    // decompose homography
-    double dx = frame_movement.at<double>(0,2);
-    double dy = frame_movement.at<double>(1,2);
-    double da = atan2(frame_movement.at<double>(1,0), frame_movement.at<double>(0,0));
-    fprintf(stderr, "frame_movement: (%+.1f, %+.1f) %+.1f degrees\n", dx, dy, da * 180 / M_PI);
-    this->frame_movements.push_back(frame_movement.inv());
-
-    // Find the accumulated camera movement since the beginning
-    Mat accumulated_movement = this->frame_movements[this->frame_movements.size() - 1].clone();
-    for (size_t i = this->frame_movements.size() - 2; i < this->frame_movements.size(); i--) {
-        accumulated_movement = accumulated_movement * this->frame_movements[i];
+    Mat rotation, translation;
+    vector<Point3d> last_frame_corner_coordinates;
+    for (size_t i = 0; i < prev_corners_identity.size(); ++i) {
+        last_frame_corner_coordinates.push_back(Point3d(
+            prev_corners_identity[i].x,
+            prev_corners_identity[i].y,
+            1
+        ));
     }
-    dx = frame_movement.at<double>(0,2);
-    dy = frame_movement.at<double>(1,2);
-    da = atan2(frame_movement.at<double>(1,0), frame_movement.at<double>(0,0));
-    fprintf(stderr, "accumulated_movement: (%+.1f, %+.1f) %+.1f degrees\n", dx, dy, da * 180 / M_PI);
+    bool success = solvePnPRansac(
+        last_frame_corner_coordinates,
+        corners_output,
+        m_output_camera.matrix,
+        m_output_camera.distortion_coefficients,
+        rotation,
+        translation
+    );
+    cerr << "success: " << success << "\n";
+    cerr << "rotation: " << rotation << "\n";
+    cerr << "translation: " << translation << "\n";
+    cerr << endl;
 
-    // convert to BGR
-    UMat frame_bgr;
-    cvtColor(input_frame, frame_bgr, COLOR_YUV2BGR_NV12);
+    Rodrigues(rotation, rotation);
+    Mat camera_movement = m_output_camera.matrix * rotation * m_output_camera.matrix.inv();
+    cerr << "frame_movement_rotation: \n" << camera_movement << "\n\n";
+    return camera_movement;
+}
+
+UMat FrameSourceWarp::warp_frame(UMat input_frame) {
+    // Create grayscale and BGR versions
+    UMat frame_gray(input_frame, Rect(0, 0, input_frame.cols, input_frame.rows * 2 / 3));
+    UMat output_frame;
+    cvtColor(input_frame, output_frame, COLOR_YUV2BGR_NV12);
 
     // Change projection
-    UMat frame_rectilinear;
-    remap(frame_bgr, frame_rectilinear, this->camera_map_1, this->camera_map_2, INTERPOLATION);
+    output_frame = normalise_projection(output_frame);
 
-    // Apply motion stabilisation
-    UMat frame_output;
-    cerr << "warping with " << accumulated_movement << "\n";
-    warpPerspective(frame_rectilinear, frame_output, accumulated_movement, frame_rectilinear.size(), INTERPOLATION);
+    if (!m_last_input_frame.empty()) {
+        UMat last_input_frame_gray(
+            m_last_input_frame,
+            Rect(0, 0, input_frame.cols, input_frame.rows * 2 / 3)
+        );
 
-    return frame_output;
+        // Find corners in the previous frame
+        vector<Point2f> prev_corners = find_corners(last_input_frame_gray);
+
+        // Find pairs of likely corresponding points in the previous and current frame
+        pair<vector<Point2f>, vector<Point2f>> point_pairs = find_point_pairs(
+            last_input_frame_gray,
+            frame_gray,
+            prev_corners
+        );
+
+        Mat camera_movement = get_camera_movement(point_pairs.first, point_pairs.second);
+
+        m_camera_movements.push_back(camera_movement);
+
+        // Find the accumulated camera movement since the beginning
+        Mat accumulated_movement = m_camera_movements[m_camera_movements.size() - 1].inv();
+        for (size_t i = m_camera_movements.size() - 2; i < m_camera_movements.size(); i--) {
+            accumulated_movement = accumulated_movement * m_camera_movements[i].inv();
+        }
+
+        // Apply motion stabilisation
+        UMat temp;
+        // cerr << "warping with " << accumulated_movement << "\n";
+        warpPerspective(output_frame, temp, accumulated_movement, output_frame.size(), INTERPOLATION);
+        output_frame = temp;
+    }
+    return output_frame;
 }
 
 UMat FrameSourceWarp::pull_frame() {
-    return this->warp_frame(this->source->pull_frame());
+    UMat input_frame = m_source->pull_frame();
+    UMat result = warp_frame(input_frame);
+    m_last_input_frame = input_frame;
+    return result;
 }
 
 UMat FrameSourceWarp::peek_frame() {
-    return this->warp_frame(this->source->peek_frame());
+    return warp_frame(m_source->peek_frame());
 }

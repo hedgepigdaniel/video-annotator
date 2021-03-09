@@ -53,7 +53,7 @@ int main (int argc, char* argv[])
     // int h_fov_s = 122.6 * M_PI / 180;
     // int d_fov = 149.2 * M_PI / 180;
     FrameSource *warped_source = new FrameSourceProfile(
-        new FrameSourceWarp(ffmpeg_source),
+        new FrameSourceWarp(ffmpeg_source, GOPRO_H4B_WIDE43_MEASURED),
         "opencv-warped"
     );
 

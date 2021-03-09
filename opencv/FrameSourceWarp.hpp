@@ -6,28 +6,53 @@
 
 #include "FrameSource.hpp"
 
-using namespace std;
-using namespace cv;
+enum CameraPreset {
+    GOPRO_H4B_WIDE43_PUBLISHED,
+    GOPRO_H4B_WIDE43_MEASURED,
+    GOPRO_H4B_WIDE43_MEASURED_STABILISATION
+};
+
+enum CameraModel {
+  RECTILINEAR,
+  FISHEYE
+};
+
+class Camera {
+  public:
+    CameraModel model;
+    cv::Matx33d matrix;
+    cv::Mat distortion_coefficients;
+    cv::Size size;
+};
 
 /**
  * FrameSourceWarp is a video processor that accepts a stream of input video frames
  * and metadata and applies reprojection and stabilisation on them
  */
 class FrameSourceWarp: public FrameSource {
-    FrameSource *source;
-    UMat last_frame_gray;
-    vector <Point2f> last_frame_corners;
-    vector<Mat> frame_movements;
-    Mat camera_matrix;
-    Mat distortion_coefficients;
-    Mat camera_map_1;
-    Mat camera_map_2;
-    Matx33d output_camera_matrix;
-    Size output_size;
+    FrameSource *m_source;
 
-    cv::UMat warp_frame(UMat input_frame);
+    // Properties of the input camera
+    Camera m_input_camera;
+
+    // Optimized pixel mapping table from output camera to input camera
+    cv::Mat m_camera_map_1;
+    cv::Mat m_camera_map_2;
+
+    // Properties of the output camera
+    Camera m_output_camera;
+
+    // The last input frame
+    cv::UMat m_last_input_frame;
+
+    // Measured input camera movements at each frame
+    std::vector<cv::Mat> m_camera_movements;
+
+    cv::UMat warp_frame(cv::UMat input_frame);
+    cv::UMat normalise_projection(cv::UMat input);
+    cv::Mat get_camera_movement(std::vector<cv::Point2f> points_prev, std::vector<cv::Point2f> points_current);
   public:
-    FrameSourceWarp(FrameSource *source);
+    FrameSourceWarp(FrameSource *source, CameraPreset input_camera);
     cv::UMat pull_frame();
     cv::UMat peek_frame();
 };
