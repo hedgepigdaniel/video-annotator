@@ -5,7 +5,7 @@
 using namespace std;
 using namespace std::chrono;
 
-AvFrameSourceProfile::AvFrameSourceProfile(AvFrameSource *source, string name) {
+AvFrameSourceProfile::AvFrameSourceProfile(shared_ptr<AvFrameSource> source, string name) {
     this->source = source;
     this->name = name;
 }

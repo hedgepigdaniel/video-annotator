@@ -6,7 +6,7 @@ using namespace cv;
 using namespace std;
 using namespace std::chrono;
 
-FrameSourceProfile::FrameSourceProfile(FrameSource *source, string name) {
+FrameSourceProfile::FrameSourceProfile(shared_ptr<FrameSource> source, string name) {
     this->source = source;
     this->name = name;
 }

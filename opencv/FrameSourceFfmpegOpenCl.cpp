@@ -92,7 +92,7 @@ int convert_ocl_images_to_nv12_umat(cl_mem cl_luma, cl_mem cl_chroma, UMat& dst)
     return ret;
 }
 
-FrameSourceFfmpegOpenCl::FrameSourceFfmpegOpenCl(AvFrameSource *source) {
+FrameSourceFfmpegOpenCl::FrameSourceFfmpegOpenCl(std::shared_ptr<AvFrameSource> source) {
     this->source = source;
 }
 

@@ -31,29 +31,28 @@ int main (int argc, char* argv[])
     }
 
     // Set up compatible hardware contexts
-    AVBufferRef *vaapi_device_ctx = create_vaapi_context();
-    AVBufferRef *opencl_device_ctx = create_opencl_context_from_vaapi(vaapi_device_ctx);
-    init_opencv_from_opencl_context(opencl_device_ctx);
+    auto av_buffer_deleter = [](AVBufferRef *ref) { av_buffer_unref(&ref); };
+    auto vaapi_device_ctx = shared_ptr<AVBufferRef>(create_vaapi_context(), av_buffer_deleter);
+    auto opencl_device_ctx = shared_ptr<AVBufferRef>(
+        create_opencl_context_from_vaapi(vaapi_device_ctx.get()),
+        av_buffer_deleter
+    );
+    init_opencv_from_opencl_context(opencl_device_ctx.get());
 
-    AvFrameSource *vaapi_source = new AvFrameSourceProfile(
-        new AvFrameSourceFileVaapi(argv[1], vaapi_device_ctx),
+    auto vaapi_source = make_shared<AvFrameSourceProfile>(
+        make_unique<AvFrameSourceFileVaapi>(argv[1], vaapi_device_ctx),
         "ffmpeg-vaapi"
     );
-    AvFrameSource *opencl_source = new AvFrameSourceProfile(
-        new AvFrameSourceMapOpenCl(vaapi_source, opencl_device_ctx),
+    auto opencl_source = make_shared<AvFrameSourceProfile>(
+        make_unique<AvFrameSourceMapOpenCl>(vaapi_source, opencl_device_ctx),
         "ffmpeg-opencl"
     );
-    FrameSource *ffmpeg_source = new FrameSourceProfile(
-        new FrameSourceFfmpegOpenCl(opencl_source),
+    auto ffmpeg_source = make_shared<FrameSourceProfile>(
+        std::make_unique<FrameSourceFfmpegOpenCl>(opencl_source),
         "opencv-mapped"
     );
-
-    // Known field of view of the camera
-    // int v_fov_s = 94.4 * M_PI / 180;
-    // int h_fov_s = 122.6 * M_PI / 180;
-    // int d_fov = 149.2 * M_PI / 180;
-    FrameSource *warped_source = new FrameSourceProfile(
-        new FrameSourceWarp(ffmpeg_source, GOPRO_H4B_WIDE43_MEASURED),
+    auto warped_source = make_shared<FrameSourceProfile>(
+        make_unique<FrameSourceWarp>(ffmpeg_source, GOPRO_H4B_WIDE43_MEASURED),
         "opencv-warped"
     );
 
@@ -72,11 +71,5 @@ int main (int argc, char* argv[])
         }
     }
 
-    delete warped_source;
-    delete ffmpeg_source;
-    delete opencl_source;
-    delete vaapi_source;
-    av_buffer_unref(&opencl_device_ctx);
-    av_buffer_unref(&vaapi_device_ctx);
     return 0;
 }

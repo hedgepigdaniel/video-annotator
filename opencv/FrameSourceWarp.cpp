@@ -104,7 +104,7 @@ Camera get_output_camera(Camera input_camera, double scale) {
     return camera;
 }
 
-FrameSourceWarp::FrameSourceWarp(FrameSource *source, CameraPreset input_camera): m_source(source) {
+FrameSourceWarp::FrameSourceWarp(std::shared_ptr<FrameSource> source, CameraPreset input_camera): m_source(source) {
     UMat first_frame = m_source->peek_frame();
     m_input_camera = get_preset_camera(
         input_camera,

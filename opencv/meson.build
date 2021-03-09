@@ -6,7 +6,7 @@ project(
 	license: 'GPL',
 	meson_version: '>=0.47.0',
 	default_options: [
-		'cpp_std=c++11',
+		'cpp_std=c++14',
         'c_std=c11',
 		'werror=true',
 	],

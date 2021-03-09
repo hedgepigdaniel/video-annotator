@@ -2,6 +2,7 @@
 #define _FRAME_SOURCE_WARP_HPP_
 
 #include <deque>
+#include <memory>
 #include <opencv2/core.hpp>
 
 #include "FrameSource.hpp"
@@ -30,7 +31,7 @@ class Camera {
  * and metadata and applies reprojection and stabilisation on them
  */
 class FrameSourceWarp: public FrameSource {
-    FrameSource *m_source;
+    std::shared_ptr<FrameSource> m_source;
 
     // Properties of the input camera
     Camera m_input_camera;
@@ -52,7 +53,7 @@ class FrameSourceWarp: public FrameSource {
     cv::UMat normalise_projection(cv::UMat input);
     cv::Mat get_camera_movement(std::vector<cv::Point2f> points_prev, std::vector<cv::Point2f> points_current);
   public:
-    FrameSourceWarp(FrameSource *source, CameraPreset input_camera);
+    FrameSourceWarp(std::shared_ptr<FrameSource> source, CameraPreset input_camera);
     cv::UMat pull_frame();
     cv::UMat peek_frame();
 };

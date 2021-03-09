@@ -5,16 +5,20 @@
 #include "AvFrameSource.hpp"
 
 #include <string>
+#include <memory>
 
 /**
  * Maps VAAPI backed `AVFrame`s to OpenCL
  */
 class AvFrameSourceMapOpenCl: public AvFrameSource {
-    AvFrameSource *source;
-    AVBufferRef *ocl_device_ctx = NULL;
+    std::shared_ptr<AvFrameSource> source;
+    std::shared_ptr<AVBufferRef> ocl_device_ctx = NULL;
     AVFrame* opencl_frame_from_vaapi_frame(AVFrame *vaapi_frame);
   public:
-    AvFrameSourceMapOpenCl(AvFrameSource *source, AVBufferRef *ocl_device_ctx);
+    AvFrameSourceMapOpenCl(
+      std::shared_ptr<AvFrameSource> source,
+      std::shared_ptr<AVBufferRef> ocl_device_ctx
+    );
     AVFrame* pull_frame();
     AVFrame* peek_frame();
 };

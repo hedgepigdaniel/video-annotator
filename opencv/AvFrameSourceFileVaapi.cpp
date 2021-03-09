@@ -32,7 +32,7 @@ static enum AVPixelFormat get_vaapi_format(
     return AV_PIX_FMT_NONE;
 }
 
-AvFrameSourceFileVaapi::AvFrameSourceFileVaapi(std::string file_path, AVBufferRef *vaapi_device_ctx) {
+AvFrameSourceFileVaapi::AvFrameSourceFileVaapi(std::string file_path, std::shared_ptr<AVBufferRef> vaapi_device_ctx) {
     this->vaapi_device_ctx = vaapi_device_ctx;
     int err;
     AVStream *video = NULL;
@@ -82,7 +82,7 @@ AvFrameSourceFileVaapi::AvFrameSourceFileVaapi(std::string file_path, AVBufferRe
         throw err;
     }
 
-    this->decoder_ctx->hw_device_ctx = av_buffer_ref(this->vaapi_device_ctx);
+    this->decoder_ctx->hw_device_ctx = av_buffer_ref(this->vaapi_device_ctx.get());
     if (!this->decoder_ctx->hw_device_ctx) {
         err = AVERROR(ENOMEM);
         cerr << "Failed to reference VAAPI hardware context:" << errString(err) << "\n";

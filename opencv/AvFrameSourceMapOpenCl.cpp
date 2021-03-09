@@ -6,7 +6,10 @@
 
 using namespace std;
 
-AvFrameSourceMapOpenCl::AvFrameSourceMapOpenCl(AvFrameSource *source, AVBufferRef *ocl_device_ctx) {
+AvFrameSourceMapOpenCl::AvFrameSourceMapOpenCl(
+    std::shared_ptr<AvFrameSource> source,
+    std::shared_ptr<AVBufferRef> ocl_device_ctx
+) {
     this->source = source;
     this->ocl_device_ctx = ocl_device_ctx;
 }
@@ -22,7 +25,7 @@ AVFrame* AvFrameSourceMapOpenCl::opencl_frame_from_vaapi_frame(AVFrame *vaapi_fr
     err = av_hwframe_ctx_create_derived(
         &ocl_hw_frames_ctx,
         AV_PIX_FMT_OPENCL,
-        this->ocl_device_ctx,
+        this->ocl_device_ctx.get(),
         vaapi_frame->hw_frames_ctx,
         AV_HWFRAME_MAP_DIRECT
     );
