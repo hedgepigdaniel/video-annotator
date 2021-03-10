@@ -21,11 +21,13 @@ void Profiler::after_exit() {
 
     steady_clock::duration average_duration = m_inner_time / m_num_frames;
     steady_clock::duration average_external_duration = (exit_time - m_start_time) / m_num_frames;
+    double average_duration_ms = duration_cast<microseconds>(average_duration).count() / 1000.0;
     fprintf(
         stderr,
-        "%s: %02.1f ms/frame (%d%% of %02.1fms total/%dfps)\n",
+        "%s: % 3.1f ms/frame (%3dfps). %3d%% of %3.1fms total/% 3dfps)\n",
         m_name.c_str(),
-        duration_cast<microseconds>(average_duration).count() / 1000.0,
+        average_duration_ms,
+        (int) (average_duration_ms == 0 ? -1 : 1000 / average_duration_ms),
         (int) (100 * average_duration / average_external_duration),
         duration_cast<microseconds>(average_external_duration).count() / 1000.0,
         (int) (1000 / duration_cast<milliseconds>(average_external_duration).count())
