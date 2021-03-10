@@ -8,11 +8,11 @@
 #include <ratio>
 #include <memory>
 
+#include "Profiler.hpp"
+
 class AvFrameSourceProfile: public AvFrameSource {
-    std::shared_ptr<AvFrameSource> source;
-    std::string name;
-    int num_frames = 0;
-    std::chrono::steady_clock::duration total_time = std::chrono::steady_clock::duration::zero();
+    std::shared_ptr<AvFrameSource> m_source;
+    Profiler m_profiler;
   public:
     AvFrameSourceProfile(std::shared_ptr<AvFrameSource> source, std::string name);
     AVFrame* pull_frame();

@@ -4,17 +4,15 @@
 #include "FrameSource.hpp"
 
 #include <string>
-#include <chrono>
-#include <ratio>
 #include <memory>
 
 #include <opencv2/core.hpp>
 
+#include "Profiler.hpp"
+
 class FrameSourceProfile: public FrameSource {
-    std::shared_ptr<FrameSource> source;
-    std::string name;
-    int num_frames = 0;
-    std::chrono::steady_clock::duration total_time = std::chrono::steady_clock::duration::zero();
+    std::shared_ptr<FrameSource> m_source;
+    Profiler m_profiler;
   public:
     FrameSourceProfile(std::shared_ptr<FrameSource> source, std::string name);
     cv::UMat pull_frame();

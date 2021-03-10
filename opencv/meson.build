@@ -23,7 +23,8 @@ display_image_sources = [
     'AvFrameSourceMapOpenCl.cpp',
     'FrameSourceProfile.cpp',
     'FrameSourceFfmpegOpenCl.cpp',
-    'utils.cpp'
+    'utils.cpp',
+    'Profiler.cpp'
 ]
 
 libavformat = dependency('libavformat')
