@@ -45,15 +45,19 @@ class FrameSourceWarp: public FrameSource {
     // Properties of the output camera
     Camera m_output_camera;
 
+    long m_frame_index = 0;
+
     // The last input frame
     cv::UMat m_last_input_frame;
+    cv::Mat m_accumulated_rotation;
+    std::vector<cv::Point2f> m_last_input_frame_corners;
 
-    // Measured input camera movements at each frame
-    std::vector<cv::Mat> m_camera_movements;
+    // The last input frame for which corners were detected from scratch
+    long m_last_key_frame_index = -1;
 
     cv::UMat warp_frame(cv::UMat input_frame);
-    cv::UMat normalise_projection(cv::UMat input);
-    cv::Mat get_camera_movement(std::vector<cv::Point2f> points_prev, std::vector<cv::Point2f> points_current);
+    cv::UMat change_projection(cv::UMat input);
+    cv::Mat guess_camera_rotation(std::vector<cv::Point2f> points_prev, std::vector<cv::Point2f> points_current);
   public:
     FrameSourceWarp(std::shared_ptr<FrameSource> source, CameraPreset input_camera);
     cv::UMat pull_frame();

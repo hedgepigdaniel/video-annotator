@@ -135,6 +135,8 @@ FrameSourceWarp::FrameSourceWarp(std::shared_ptr<FrameSource> source, CameraPres
         m_camera_map_1,
         m_camera_map_2
     );
+
+    m_accumulated_rotation = Mat::eye(3, 3, CV_64F);
 }
 
 vector<Point2f> find_corners(UMat image) {
@@ -152,7 +154,7 @@ vector<Point2f> find_corners(UMat image) {
     return corners;
 }
 
-pair<vector<Point2f>, vector<Point2f>> find_point_pairs(
+pair<vector<Point2f>, vector<Point2f>> find_point_pairs_with_optical_flow(
     UMat prev_frame,
     UMat current_frame,
     vector<Point2f> prev_corners
@@ -182,7 +184,7 @@ pair<vector<Point2f>, vector<Point2f>> find_point_pairs(
     return pair<vector<Point2f>, vector<Point2f>>(prev_points, current_points);
 }
 
-UMat FrameSourceWarp::normalise_projection(UMat input_camera_frame) {
+UMat FrameSourceWarp::change_projection(UMat input_camera_frame) {
     UMat output_camera_frame;
     remap(
         input_camera_frame,
@@ -194,7 +196,7 @@ UMat FrameSourceWarp::normalise_projection(UMat input_camera_frame) {
     return output_camera_frame;
 }
 
-Mat FrameSourceWarp::get_camera_movement(vector<Point2f> points_prev, vector<Point2f> points_current) {
+Mat FrameSourceWarp::guess_camera_rotation(vector<Point2f> points_prev, vector<Point2f> points_current) {
     vector<Point2f> corners_output;
     fisheye::undistortPoints(
         points_current,
@@ -239,13 +241,9 @@ Mat FrameSourceWarp::get_camera_movement(vector<Point2f> points_prev, vector<Poi
         cerr << "solvePnPRansac failed!" << endl;
         return Mat::eye(3, 3, CV_64F);
     }
-    cerr << "rotation: " << rotation << "\n";
-    cerr << "translation: " << translation << "\n";
-    cerr << endl;
 
     Rodrigues(rotation, rotation);
     Mat camera_movement = m_output_camera.matrix * rotation * m_output_camera.matrix.inv();
-    cerr << "frame_movement_rotation: \n" << camera_movement << "\n\n";
     return camera_movement;
 }
 
@@ -256,47 +254,51 @@ UMat FrameSourceWarp::warp_frame(UMat input_frame) {
     cvtColor(input_frame, output_frame, COLOR_YUV2BGR_NV12);
 
     // Change projection
-    output_frame = normalise_projection(output_frame);
+    output_frame = change_projection(output_frame);
 
-    if (!m_last_input_frame.empty()) {
-        UMat last_input_frame_gray(
-            m_last_input_frame,
-            Rect(0, 0, input_frame.cols, input_frame.rows * 2 / 3)
-        );
+    if (m_last_key_frame_index == -1) {
+        // This is the first frame
+        m_last_key_frame_index = m_frame_index;
+        m_last_input_frame_corners = find_corners(frame_gray);
+    } else {
 
-        // Find corners in the previous frame
-        vector<Point2f> prev_corners = find_corners(last_input_frame_gray);
-
-        // Find pairs of likely corresponding points in the previous and current frame
-        pair<vector<Point2f>, vector<Point2f>> point_pairs = find_point_pairs(
-            last_input_frame_gray,
-            frame_gray,
-            prev_corners
-        );
-
-        Mat camera_movement = get_camera_movement(point_pairs.first, point_pairs.second);
-
-        m_camera_movements.push_back(camera_movement);
-
-        // Find the accumulated camera movement since the beginning
-        Mat accumulated_movement = m_camera_movements[m_camera_movements.size() - 1].inv();
-        for (size_t i = m_camera_movements.size() - 2; i < m_camera_movements.size(); i--) {
-            accumulated_movement = accumulated_movement * m_camera_movements[i].inv();
+        /**
+         * We sometimes reuse corners which were first detected in older frames, and since
+         * successfully followed with optical flow. If it's been too long since we detected
+         * corners from scratch or there are too few corners left from the original set,
+         * we find a new set of corners.
+         */
+        if (m_frame_index - m_last_key_frame_index > 20 || m_last_input_frame_corners.size() < 150) {
+            // Find corners in the last frame by Harris response
+            m_last_key_frame_index = m_frame_index - 1;
+            m_last_input_frame_corners = find_corners(m_last_input_frame);
         }
 
-        // Apply motion stabilisation
+        // Use optical flow to see where the corners moved since the last frame
+        pair<vector<Point2f>, vector<Point2f>> point_pairs = find_point_pairs_with_optical_flow(
+            m_last_input_frame,
+            frame_gray,
+            m_last_input_frame_corners
+        );
+        m_last_input_frame_corners = point_pairs.second;
+
+        // Calculate the camera rotation since the last frame with RANSAC
+        Mat rotation_since_last_frame = guess_camera_rotation(point_pairs.first, point_pairs.second).inv();
+        m_accumulated_rotation = rotation_since_last_frame * m_accumulated_rotation;
+
+        // Stabilise by applying the inverse of the accumulated camera rotation
         UMat temp;
-        // cerr << "warping with " << accumulated_movement << "\n";
-        warpPerspective(output_frame, temp, accumulated_movement, output_frame.size(), INTERPOLATION);
+        warpPerspective(output_frame, temp, m_accumulated_rotation, output_frame.size(), INTERPOLATION);
         output_frame = temp;
     }
+    m_last_input_frame = frame_gray;
+    ++m_frame_index;
     return output_frame;
 }
 
 UMat FrameSourceWarp::pull_frame() {
     UMat input_frame = m_source->pull_frame();
     UMat result = warp_frame(input_frame);
-    m_last_input_frame = input_frame;
     return result;
 }
 
