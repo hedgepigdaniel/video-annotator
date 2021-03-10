@@ -49,7 +49,8 @@ class FrameSourceWarp: public FrameSource {
 
     // The last input frame
     cv::UMat m_last_input_frame;
-    cv::Mat m_accumulated_rotation;
+    cv::Vec3f m_measured_rotation;
+    cv::Vec3f m_corrected_rotation;
     std::vector<cv::Point2f> m_last_input_frame_corners;
 
     // The last input frame for which corners were detected from scratch

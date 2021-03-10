@@ -19,6 +19,84 @@ const int INTERPOLATION = INTER_LINEAR;
 const int GOPRO_H4B_FOV_H_NOSTAB = 122.6;
 const int GOPRO_H4B_FOV_V_NOSTAB = 94.4;
 
+// Checks if a matrix is a valid rotation matrix.
+bool isRotationMatrix(Mat R)
+{
+    Mat Rt;
+    transpose(R, Rt);
+    Mat shouldBeIdentity = Rt * R;
+    Mat I = Mat::eye(3,3, shouldBeIdentity.type());
+    
+    return  norm(I, shouldBeIdentity) < 1e-6;
+    
+}
+
+// Calculates rotation matrix to euler angles
+// The result is the same as MATLAB except the order
+// of the euler angles ( x and z are swapped ).
+Vec3f rotationMatrixToEulerAngles(Mat R)
+{
+
+    assert(isRotationMatrix(R));
+    
+    float sy = sqrt(R.at<double>(0,0) * R.at<double>(0,0) +  R.at<double>(1,0) * R.at<double>(1,0) );
+
+    bool singular = sy < 1e-6; // If
+
+    float x, y, z;
+    if (!singular)
+    {
+        x = atan2(R.at<double>(2,1) , R.at<double>(2,2));
+        y = atan2(-R.at<double>(2,0), sy);
+        z = atan2(R.at<double>(1,0), R.at<double>(0,0));
+    }
+    else
+    {
+        x = atan2(-R.at<double>(1,2), R.at<double>(1,1));
+        y = atan2(-R.at<double>(2,0), sy);
+        z = 0;
+    }
+    return Vec3f(x, y, z);
+    
+    
+    
+}
+
+
+// Calculates rotation matrix given euler angles.
+Mat eulerAnglesToRotationMatrix(Vec3f theta)
+{
+    // Calculate rotation about x axis
+    Mat R_x = (Mat_<double>(3,3) <<
+               1,       0,              0,
+               0,       cos(theta[0]),   -sin(theta[0]),
+               0,       sin(theta[0]),   cos(theta[0])
+               );
+    
+    // Calculate rotation about y axis
+    Mat R_y = (Mat_<double>(3,3) <<
+               cos(theta[1]),    0,      sin(theta[1]),
+               0,               1,      0,
+               -sin(theta[1]),   0,      cos(theta[1])
+               );
+    
+    // Calculate rotation about z axis
+    Mat R_z = (Mat_<double>(3,3) <<
+               cos(theta[2]),    -sin(theta[2]),      0,
+               sin(theta[2]),    cos(theta[2]),       0,
+               0,               0,                  1);
+    
+    
+    // Combined rotation matrix
+    Mat R = R_z * R_y * R_x;
+    
+    return R;
+
+}
+
+
+
+
 Camera get_preset_camera(CameraPreset preset, Size input_size) {
     Mat camera_matrix = Mat::eye(3, 3, CV_64F);
 
@@ -136,7 +214,8 @@ FrameSourceWarp::FrameSourceWarp(std::shared_ptr<FrameSource> source, CameraPres
         m_camera_map_2
     );
 
-    m_accumulated_rotation = Mat::eye(3, 3, CV_64F);
+    m_measured_rotation = Vec3f(0, 0, 0);
+    m_corrected_rotation = Vec3f(0, 0, 0);
 }
 
 vector<Point2f> find_corners(UMat image) {
@@ -243,8 +322,7 @@ Mat FrameSourceWarp::guess_camera_rotation(vector<Point2f> points_prev, vector<P
     }
 
     Rodrigues(rotation, rotation);
-    Mat camera_movement = m_output_camera.matrix * rotation * m_output_camera.matrix.inv();
-    return camera_movement;
+    return rotation;
 }
 
 UMat FrameSourceWarp::warp_frame(UMat input_frame) {
@@ -283,12 +361,24 @@ UMat FrameSourceWarp::warp_frame(UMat input_frame) {
         m_last_input_frame_corners = point_pairs.second;
 
         // Calculate the camera rotation since the last frame with RANSAC
-        Mat rotation_since_last_frame = guess_camera_rotation(point_pairs.first, point_pairs.second).inv();
-        m_accumulated_rotation = rotation_since_last_frame * m_accumulated_rotation;
+        m_measured_rotation += rotationMatrixToEulerAngles(
+            guess_camera_rotation(point_pairs.first, point_pairs.second)
+        );
+        float gain = 0.1;
+        m_corrected_rotation = gain * m_measured_rotation + (1 - gain) * m_corrected_rotation;
+        cerr << "measured rotation: " << m_measured_rotation << endl;
+        cerr << "corrected rotation: " << m_corrected_rotation << endl;
 
         // Stabilise by applying the inverse of the accumulated camera rotation
+        Mat correction = eulerAnglesToRotationMatrix(m_corrected_rotation - m_measured_rotation);
         UMat temp;
-        warpPerspective(output_frame, temp, m_accumulated_rotation, output_frame.size(), INTERPOLATION);
+        warpPerspective(
+            output_frame,
+            temp,
+            m_output_camera.matrix * correction * m_output_camera.matrix.inv(),
+            output_frame.size(),
+            INTERPOLATION
+        );
         output_frame = temp;
     }
     m_last_input_frame = frame_gray;
