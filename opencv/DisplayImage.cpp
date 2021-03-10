@@ -52,7 +52,7 @@ int main (int argc, char* argv[])
         "opencv-mapped"
     );
     auto warped_source = make_shared<FrameSourceProfile>(
-        make_unique<FrameSourceWarp>(ffmpeg_source, GOPRO_H4B_WIDE43_MEASURED),
+        make_unique<FrameSourceWarp>(ffmpeg_source, GOPRO_H4B_WIDE169_MEASURED),
         "opencv-warped"
     );
 
