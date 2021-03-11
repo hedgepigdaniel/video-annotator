@@ -6,7 +6,6 @@
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/calib3d.hpp>
-#include <opencv2/video/tracking.hpp>
 #include <opencv2/highgui.hpp>
 
 using namespace std;
@@ -18,84 +17,6 @@ const int INTERPOLATION = INTER_LINEAR;
 // https://community.gopro.com/t5/en/HERO4-Field-of-View-FOV-Information/ta-p/390285
 const int GOPRO_H4B_FOV_H_NOSTAB = 122.6;
 const int GOPRO_H4B_FOV_V_NOSTAB = 94.4;
-
-// Checks if a matrix is a valid rotation matrix.
-bool isRotationMatrix(Mat R)
-{
-    Mat Rt;
-    transpose(R, Rt);
-    Mat shouldBeIdentity = Rt * R;
-    Mat I = Mat::eye(3,3, shouldBeIdentity.type());
-    
-    return  norm(I, shouldBeIdentity) < 1e-6;
-    
-}
-
-// Calculates rotation matrix to euler angles
-// The result is the same as MATLAB except the order
-// of the euler angles ( x and z are swapped ).
-Vec3f rotationMatrixToEulerAngles(Mat R)
-{
-
-    assert(isRotationMatrix(R));
-    
-    float sy = sqrt(R.at<double>(0,0) * R.at<double>(0,0) +  R.at<double>(1,0) * R.at<double>(1,0) );
-
-    bool singular = sy < 1e-6; // If
-
-    float x, y, z;
-    if (!singular)
-    {
-        x = atan2(R.at<double>(2,1) , R.at<double>(2,2));
-        y = atan2(-R.at<double>(2,0), sy);
-        z = atan2(R.at<double>(1,0), R.at<double>(0,0));
-    }
-    else
-    {
-        x = atan2(-R.at<double>(1,2), R.at<double>(1,1));
-        y = atan2(-R.at<double>(2,0), sy);
-        z = 0;
-    }
-    return Vec3f(x, y, z);
-    
-    
-    
-}
-
-
-// Calculates rotation matrix given euler angles.
-Mat eulerAnglesToRotationMatrix(Vec3f theta)
-{
-    // Calculate rotation about x axis
-    Mat R_x = (Mat_<double>(3,3) <<
-               1,       0,              0,
-               0,       cos(theta[0]),   -sin(theta[0]),
-               0,       sin(theta[0]),   cos(theta[0])
-               );
-    
-    // Calculate rotation about y axis
-    Mat R_y = (Mat_<double>(3,3) <<
-               cos(theta[1]),    0,      sin(theta[1]),
-               0,               1,      0,
-               -sin(theta[1]),   0,      cos(theta[1])
-               );
-    
-    // Calculate rotation about z axis
-    Mat R_z = (Mat_<double>(3,3) <<
-               cos(theta[2]),    -sin(theta[2]),      0,
-               sin(theta[2]),    cos(theta[2]),       0,
-               0,               0,                  1);
-    
-    
-    // Combined rotation matrix
-    Mat R = R_z * R_y * R_x;
-    
-    return R;
-
-}
-
-
-
 
 Camera get_preset_camera(CameraPreset preset, Size input_size) {
     Mat camera_matrix = Mat::eye(3, 3, CV_64F);
@@ -195,6 +116,16 @@ Camera get_output_camera(Camera input_camera, double scale) {
     return camera;
 }
 
+void init_filter(KalmanFilter &filter) {
+    filter.init(2, 1);
+    setIdentity(filter.measurementMatrix);
+    setIdentity(filter.processNoiseCov, Scalar::all(1e-5));
+    setIdentity(filter.measurementNoiseCov, Scalar::all(1e-1));
+    setIdentity(filter.errorCovPost, Scalar::all(1));
+    setIdentity(filter.transitionMatrix);
+    filter.transitionMatrix.at<float>(0, 1) = 1;
+}
+
 FrameSourceWarp::FrameSourceWarp(std::shared_ptr<FrameSource> source, CameraPreset input_camera): m_source(source) {
     UMat first_frame = m_source->peek_frame();
     m_input_camera = get_preset_camera(
@@ -215,7 +146,10 @@ FrameSourceWarp::FrameSourceWarp(std::shared_ptr<FrameSource> source, CameraPres
     );
 
     m_measured_rotation = Vec3f(0, 0, 0);
-    m_corrected_rotation = Vec3f(0, 0, 0);
+
+    init_filter(m_x_filter);
+    init_filter(m_y_filter);
+    init_filter(m_z_filter);
 }
 
 vector<Point2f> find_corners(UMat image) {
@@ -364,10 +298,15 @@ UMat FrameSourceWarp::warp_frame(UMat input_frame) {
         m_measured_rotation += rotationMatrixToEulerAngles(
             guess_camera_rotation(point_pairs.first, point_pairs.second)
         );
-        float gain = 0.1;
-        m_corrected_rotation = gain * m_measured_rotation + (1 - gain) * m_corrected_rotation;
-        cerr << "measured rotation: " << m_measured_rotation << endl;
-        cerr << "corrected rotation: " << m_corrected_rotation << endl;
+        m_x_filter.correct(Mat(1, 1, CV_32F, &m_measured_rotation[0]));
+        m_y_filter.correct(Mat(1, 1, CV_32F, &m_measured_rotation[1]));
+        m_z_filter.correct(Mat(1, 1, CV_32F, &m_measured_rotation[2]));
+
+        Vec3f m_corrected_rotation(
+            m_x_filter.predict().at<float>(0, 0),
+            m_y_filter.predict().at<float>(0, 0),
+            m_z_filter.predict().at<float>(0, 0)
+        );
 
         // Stabilise by applying the inverse of the accumulated camera rotation
         Mat correction = eulerAnglesToRotationMatrix(m_corrected_rotation - m_measured_rotation);

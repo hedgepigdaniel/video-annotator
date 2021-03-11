@@ -4,8 +4,10 @@
 #include <deque>
 #include <memory>
 #include <opencv2/core.hpp>
+#include <opencv2/video/tracking.hpp>
 
 #include "FrameSource.hpp"
+#include "rotation.hpp"
 
 enum CameraPreset {
     GOPRO_H4B_WIDE43_PUBLISHED,
@@ -50,7 +52,10 @@ class FrameSourceWarp: public FrameSource {
     // The last input frame
     cv::UMat m_last_input_frame;
     cv::Vec3f m_measured_rotation;
-    cv::Vec3f m_corrected_rotation;
+    cv::KalmanFilter m_x_filter;
+    cv::KalmanFilter m_y_filter;
+    cv::KalmanFilter m_z_filter;
+
     std::vector<cv::Point2f> m_last_input_frame_corners;
 
     // The last input frame for which corners were detected from scratch

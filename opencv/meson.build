@@ -24,7 +24,8 @@ display_image_sources = [
     'FrameSourceProfile.cpp',
     'FrameSourceFfmpegOpenCl.cpp',
     'utils.cpp',
-    'Profiler.cpp'
+    'Profiler.cpp',
+    'rotation.cpp'
 ]
 
 libavformat = dependency('libavformat')
