@@ -6,10 +6,11 @@
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/calib3d.hpp>
-#include <opencv2/highgui.hpp>
+#include <opencv2/video/tracking.hpp>
 
 using namespace std;
 using namespace cv;
+using namespace gram_sg;
 
 const int INTERPOLATION = INTER_LINEAR;
 
@@ -126,7 +127,14 @@ void init_filter(KalmanFilter &filter) {
     filter.transitionMatrix.at<float>(0, 1) = 1;
 }
 
-FrameSourceWarp::FrameSourceWarp(std::shared_ptr<FrameSource> source, CameraPreset input_camera): m_source(source) {
+FrameSourceWarp::FrameSourceWarp(
+    std::shared_ptr<FrameSource> source,
+    CameraPreset input_camera
+):
+    m_source(source),
+    m_measured_rotation(Mat::eye(3, 3, CV_64F)),
+    m_rotation_filter(RotationFilter(SavitzkyGolayFilterConfig(60, 60, 2, 0)))
+{
     UMat first_frame = m_source->peek_frame();
     m_input_camera = get_preset_camera(
         input_camera,
@@ -144,12 +152,6 @@ FrameSourceWarp::FrameSourceWarp(std::shared_ptr<FrameSource> source, CameraPres
         m_camera_map_1,
         m_camera_map_2
     );
-
-    m_measured_rotation = Vec3f(0, 0, 0);
-
-    init_filter(m_x_filter);
-    init_filter(m_y_filter);
-    init_filter(m_z_filter);
 }
 
 vector<Point2f> find_corners(UMat image) {
@@ -259,6 +261,26 @@ Mat FrameSourceWarp::guess_camera_rotation(vector<Point2f> points_prev, vector<P
     return rotation;
 }
 
+Eigen::Matrix3d eigen_mat_from_cv_mat (Mat cv_mat) {
+    Eigen::Matrix3d eigen_mat;
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            eigen_mat(i, j) = cv_mat.at<double>(i, j);
+        }
+    }
+    return eigen_mat;
+}
+
+Mat cv_mat_from_eigen_mat(Eigen::Matrix3d eigen_mat) {
+    Mat cv_mat(3, 3, CV_64F);
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            cv_mat.at<double>(i, j) = eigen_mat(i, j);
+        }
+    }
+    return cv_mat;
+}
+
 UMat FrameSourceWarp::warp_frame(UMat input_frame) {
     // Create grayscale and BGR versions
     UMat frame_gray(input_frame, Rect(0, 0, input_frame.cols, input_frame.rows * 2 / 3));
@@ -295,21 +317,14 @@ UMat FrameSourceWarp::warp_frame(UMat input_frame) {
         m_last_input_frame_corners = point_pairs.second;
 
         // Calculate the camera rotation since the last frame with RANSAC
-        m_measured_rotation += rotationMatrixToEulerAngles(
-            guess_camera_rotation(point_pairs.first, point_pairs.second)
-        );
-        m_x_filter.correct(Mat(1, 1, CV_32F, &m_measured_rotation[0]));
-        m_y_filter.correct(Mat(1, 1, CV_32F, &m_measured_rotation[1]));
-        m_z_filter.correct(Mat(1, 1, CV_32F, &m_measured_rotation[2]));
+        Mat rotation_since_last_frame = guess_camera_rotation(point_pairs.first, point_pairs.second);
+        m_measured_rotation = rotation_since_last_frame * m_measured_rotation;
 
-        Vec3f m_corrected_rotation(
-            m_x_filter.predict().at<float>(0, 0),
-            m_y_filter.predict().at<float>(0, 0),
-            m_z_filter.predict().at<float>(0, 0)
-        );
+        m_rotation_filter.add(eigen_mat_from_cv_mat(m_measured_rotation));
+        Mat corrected_rotation = cv_mat_from_eigen_mat(m_rotation_filter.filter());
 
         // Stabilise by applying the inverse of the accumulated camera rotation
-        Mat correction = eulerAnglesToRotationMatrix(m_corrected_rotation - m_measured_rotation);
+        Mat correction = corrected_rotation * m_measured_rotation.inv();
         UMat temp;
         warpPerspective(
             output_frame,

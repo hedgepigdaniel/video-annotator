@@ -25,7 +25,6 @@ display_image_sources = [
     'FrameSourceFfmpegOpenCl.cpp',
     'utils.cpp',
     'Profiler.cpp',
-    'rotation.cpp'
 ]
 
 libavformat = dependency('libavformat')
@@ -35,6 +34,7 @@ opencv = dependency('opencv4')
 opencl = dependency('OpenCL')
 libva_drm = dependency('libva-drm')
 gpmf_parser = dependency('gpmf-parser')
+gram_savitzky_golay = dependency('gram_savitzky_golay')
 
 
 dependencies = [
@@ -45,6 +45,7 @@ dependencies = [
     opencl,
     libva_drm,
     gpmf_parser,
+    gram_savitzky_golay,
 ]
 
 executable(
