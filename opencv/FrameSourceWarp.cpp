@@ -129,11 +129,13 @@ void init_filter(KalmanFilter &filter) {
 
 FrameSourceWarp::FrameSourceWarp(
     std::shared_ptr<FrameSource> source,
-    CameraPreset input_camera
+    CameraPreset input_camera,
+    int smooth_radius
 ):
     m_source(source),
     m_measured_rotation(Mat::eye(3, 3, CV_64F)),
-    m_rotation_filter(RotationFilter(SavitzkyGolayFilterConfig(60, 60, 2, 0)))
+    m_smooth_radius(smooth_radius),
+    m_rotation_filter(RotationFilter(SavitzkyGolayFilterConfig(smooth_radius, 0, 2, 0)))
 {
     UMat first_frame = m_source->peek_frame();
     m_input_camera = get_preset_camera(
@@ -281,7 +283,7 @@ Mat cv_mat_from_eigen_mat(Eigen::Matrix3d eigen_mat) {
     return cv_mat;
 }
 
-UMat FrameSourceWarp::warp_frame(UMat input_frame) {
+void FrameSourceWarp::warp_frame(UMat input_frame) {
     // Create grayscale and BGR versions
     UMat frame_gray(input_frame, Rect(0, 0, input_frame.cols, input_frame.rows * 2 / 3));
     UMat output_frame;
@@ -318,34 +320,49 @@ UMat FrameSourceWarp::warp_frame(UMat input_frame) {
 
         // Calculate the camera rotation since the last frame with RANSAC
         Mat rotation_since_last_frame = guess_camera_rotation(point_pairs.first, point_pairs.second);
-        m_measured_rotation = rotation_since_last_frame * m_measured_rotation;
+        Mat accumulated_rotation = rotation_since_last_frame * m_measured_rotation;
+        m_measured_rotation = accumulated_rotation;
 
-        m_rotation_filter.add(eigen_mat_from_cv_mat(m_measured_rotation));
-        Mat corrected_rotation = cv_mat_from_eigen_mat(m_rotation_filter.filter());
-
-        // Stabilise by applying the inverse of the accumulated camera rotation
-        Mat correction = corrected_rotation * m_measured_rotation.inv();
-        UMat temp;
-        warpPerspective(
-            output_frame,
-            temp,
-            m_output_camera.matrix * correction * m_output_camera.matrix.inv(),
-            output_frame.size(),
-            INTERPOLATION
-        );
-        output_frame = temp;
+        m_rotation_filter.add(eigen_mat_from_cv_mat(accumulated_rotation));
+        m_buffered_frames.push(output_frame);
+        m_buffered_rotations.push(accumulated_rotation);
     }
     m_last_input_frame = frame_gray;
     ++m_frame_index;
-    return output_frame;
 }
 
 UMat FrameSourceWarp::pull_frame() {
-    UMat input_frame = m_source->pull_frame();
-    UMat result = warp_frame(input_frame);
-    return result;
+    while(m_buffered_frames.size() < m_smooth_radius) {
+        try {
+            warp_frame(m_source->pull_frame());
+        } catch (int err) {
+            if (err == EOF) {
+                break;
+            }
+            throw err;
+        }
+    }
+    if (m_buffered_frames.size() == 0) {
+        throw EOF;
+    }
+    // Stabilise by applying the inverse of the accumulated camera rotation
+    UMat frame = m_buffered_frames.front();
+    Mat measured_rotation = m_buffered_rotations.front();
+    Mat corrected_rotation = cv_mat_from_eigen_mat(m_rotation_filter.filter());
+    Mat correction = corrected_rotation * measured_rotation.inv();
+    UMat output_frame;
+    warpPerspective(
+        frame,
+        output_frame,
+        m_output_camera.matrix * correction * m_output_camera.matrix.inv(),
+        output_frame.size(),
+        INTERPOLATION
+    );
+    m_buffered_frames.pop();
+    m_buffered_rotations.pop();
+    return output_frame;
 }
 
 UMat FrameSourceWarp::peek_frame() {
-    return warp_frame(m_source->peek_frame());
+    return pull_frame();
 }

@@ -3,6 +3,7 @@
 
 #include <deque>
 #include <memory>
+#include <queue>
 #include <opencv2/core.hpp>
 #include <gram_savitzky_golay/spatial_filters.h>
 
@@ -51,18 +52,21 @@ class FrameSourceWarp: public FrameSource {
     // The last input frame
     cv::UMat m_last_input_frame;
     cv::Mat m_measured_rotation;
+    unsigned int m_smooth_radius;
     gram_sg::RotationFilter m_rotation_filter;
+    std::queue<cv::UMat> m_buffered_frames;
+    std::queue<cv::Mat> m_buffered_rotations;
 
     std::vector<cv::Point2f> m_last_input_frame_corners;
 
     // The last input frame for which corners were detected from scratch
     long m_last_key_frame_index = -1;
 
-    cv::UMat warp_frame(cv::UMat input_frame);
+    void warp_frame(cv::UMat input_frame);
     cv::UMat change_projection(cv::UMat input);
     cv::Mat guess_camera_rotation(std::vector<cv::Point2f> points_prev, std::vector<cv::Point2f> points_current);
   public:
-    FrameSourceWarp(std::shared_ptr<FrameSource> source, CameraPreset input_camera);
+    FrameSourceWarp(std::shared_ptr<FrameSource> source, CameraPreset input_camera, int smooth_radius = 30);
     cv::UMat pull_frame();
     cv::UMat peek_frame();
 };
