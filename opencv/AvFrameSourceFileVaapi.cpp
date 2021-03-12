@@ -137,6 +137,7 @@ AVFrame* AvFrameSourceFileVaapi::peek_frame() {
     this->next_frame = av_frame_alloc();
     do {
         if (this->input_ended) {
+            av_frame_free(&this->next_frame);
             throw EOF;
         }
         err = avcodec_receive_frame(this->decoder_ctx, this->next_frame);
