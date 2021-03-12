@@ -77,25 +77,28 @@ Camera get_preset_camera(CameraPreset preset, Size input_size) {
 Camera get_output_camera(Camera input_camera, double scale) {
     Size input_size = input_camera.size;
 
+    // Find the coordinates of the corners and edge midpoints in the identity camera
     vector<Point2d> extreme_points;
     fisheye::undistortPoints(
         vector<Point2d>({
             // corners
             Point2d(0, 0),
-            Point2d(0, input_size.height),
-            Point2d(input_size.width, 0),
-            Point2d(input_size.width, input_size.height),
+            Point2d(0, input_size.height - 1),
+            Point2d(input_size.width - 1, 0),
+            Point2d(input_size.width - 1, input_size.height - 1),
 
             // midpoint of edges
-            Point2d(input_size.width / 2, 0),
-            Point2d(input_size.width, input_size.height / 2),
-            Point2d(input_size.width / 2, input_size.height),
-            Point2d(0, input_size.height / 2),
+            Point2d((input_size.width - 1.) / 2, 0),
+            Point2d(input_size.width - 1, (input_size.height - 1.) / 2),
+            Point2d((input_size.width - 1.) / 2, input_size.height - 1),
+            Point2d(0, (input_size.height - 1.) / 2),
         }),
         extreme_points,
         input_camera.matrix,
         input_camera.distortion_coefficients
     );
+
+    // Find a bounding rectangle in the identity camera which maps to all points in the input
     auto compare_x = [](const Point2d &point1, const Point2d &point2) { return point1.x < point2.x; };
     auto compare_y = [](const Point2d &point1, const Point2d &point2) { return point1.y < point2.y; };
     double max_x = max_element( begin(extreme_points), end(extreme_points), compare_x)->x;
@@ -103,11 +106,23 @@ Camera get_output_camera(Camera input_camera, double scale) {
     double max_y = max_element( begin(extreme_points), end(extreme_points), compare_y)->y;
     double min_y = min_element( begin(extreme_points), end(extreme_points), compare_y)->y;
 
+    // Find (roughly) the average scale on the diagonal between the before/after cameras
+    Point input_diagonal = Point2d(input_size.width - 1, input_size.height - 1);
+    double input_diagonal_length = sqrt(
+        1. * input_diagonal.x * input_diagonal.x + input_diagonal.y * input_diagonal.y
+    );
+    Point output_diagonal = extreme_points[3] - extreme_points[0];
+    double output_diagonal_length = sqrt(
+        1. * output_diagonal.x * output_diagonal.x + output_diagonal.y * output_diagonal.y
+    );
+    scale *= input_diagonal_length / output_diagonal_length;
+
+    // Create output camera matrix, with the center positioned to ideally fit the remapped input
     Matx33d matrix = Matx33d::eye();
     matrix(0, 0) = scale;
     matrix(1, 1) = scale;
-    matrix(0, 2) = scale * (max_x - min_x) / 2;
-    matrix(1, 2) = scale * (max_y - min_y) / 2;
+    matrix(0, 2) = scale * - min_x;
+    matrix(1, 2) = scale * - min_y;
 
     Camera camera;
     camera.model = RECTILINEAR;
@@ -142,7 +157,7 @@ FrameSourceWarp::FrameSourceWarp(
         input_camera,
         Size(first_frame.cols, first_frame.rows * 2 / 3)
     );
-    m_output_camera = get_output_camera(m_input_camera, m_input_camera.size.width / 5);
+    m_output_camera = get_output_camera(m_input_camera, 0.5);
 
     fisheye::initUndistortRectifyMap(
         m_input_camera.matrix,
