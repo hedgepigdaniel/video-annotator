@@ -408,7 +408,7 @@ void FrameSourceWarp::consume_frame(UMat input_frame) {
 }
 
 UMat FrameSourceWarp::pull_frame() {
-    while(m_buffered_frames.size() < m_smooth_radius) {
+    while(m_buffered_frames.size() <= m_smooth_radius) {
         try {
             consume_frame(m_source->pull_frame());
         } catch (int err) {
