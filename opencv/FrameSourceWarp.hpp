@@ -5,6 +5,7 @@
 #include <memory>
 #include <queue>
 #include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
 #include <gram_savitzky_golay/spatial_filters.h>
 
 #include "FrameSource.hpp"
@@ -67,7 +68,14 @@ class FrameSourceWarp: public FrameSource {
     cv::UMat change_projection(cv::UMat input);
     cv::Mat guess_camera_rotation(std::vector<cv::Point2f> points_prev, std::vector<cv::Point2f> points_current);
   public:
-    FrameSourceWarp(std::shared_ptr<FrameSource> source, CameraPreset input_camera, int smooth_radius = 30);
+    FrameSourceWarp(
+      std::shared_ptr<FrameSource> source,
+      CameraPreset input_camera,
+      double scale = 1,
+      bool crop_borders = false,
+      double zoom = 1,
+      int smooth_radius = 30
+    );
     cv::UMat pull_frame();
     cv::UMat peek_frame();
 };

@@ -4,7 +4,6 @@
 #include <math.h>
 #include <cstdlib>
 
-#include <opencv2/imgproc.hpp>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/video/tracking.hpp>
 
@@ -80,7 +79,7 @@ Camera get_preset_camera(CameraPreset preset, Size input_size) {
     return camera;
 }
 
-Camera get_output_camera(Camera input_camera, double scale) {
+Camera get_output_camera(Camera input_camera, double scale, bool crop_borders, double zoom) {
     Size input_size = input_camera.size;
 
     // Find the coordinates of the corners and edge midpoints in the identity camera
@@ -105,12 +104,33 @@ Camera get_output_camera(Camera input_camera, double scale) {
     );
 
     // Find a bounding rectangle in the identity camera which maps to all points in the input
-    auto compare_x = [](const Point2d &point1, const Point2d &point2) { return point1.x < point2.x; };
-    auto compare_y = [](const Point2d &point1, const Point2d &point2) { return point1.y < point2.y; };
-    double max_x = max_element( begin(extreme_points), end(extreme_points), compare_x)->x;
-    double min_x = min_element( begin(extreme_points), end(extreme_points), compare_x)->x;
-    double max_y = max_element( begin(extreme_points), end(extreme_points), compare_y)->y;
-    double min_y = min_element( begin(extreme_points), end(extreme_points), compare_y)->y;
+    auto compare_x = [](const Point2d &point1, const Point2d &point2) {
+        return point1.x < point2.x;
+    };
+    auto compare_y = [](const Point2d &point1, const Point2d &point2) {
+        return point1.y < point2.y;
+    };
+    int start_point = crop_borders ? 4 : 0;
+    double max_x = max_element(
+        begin(extreme_points) + start_point,
+        end(extreme_points),
+        compare_x
+    )->x;
+    double min_x = min_element(
+        begin(extreme_points) + start_point,
+        end(extreme_points),
+        compare_x
+    )->x;
+    double max_y = max_element(
+        begin(extreme_points) + start_point,
+        end(extreme_points),
+        compare_y
+    )->y;
+    double min_y = min_element(
+        begin(extreme_points) + start_point,
+        end(extreme_points),
+        compare_y
+    )->y;
 
     // Find (roughly) the average scale on the diagonal between the before/after cameras
     Point input_diagonal = Point2d(input_size.width - 1, input_size.height - 1);
@@ -127,14 +147,14 @@ Camera get_output_camera(Camera input_camera, double scale) {
     Matx33d matrix = Matx33d::eye();
     matrix(0, 0) = scale;
     matrix(1, 1) = scale;
-    matrix(0, 2) = scale * - min_x;
-    matrix(1, 2) = scale * - min_y;
+    matrix(0, 2) = scale * - min_x / zoom;
+    matrix(1, 2) = scale * - min_y / zoom;
 
     Camera camera;
     camera.model = RECTILINEAR;
     camera.matrix = matrix;
     camera.distortion_coefficients = Mat::zeros(4, 1, CV_64F);
-    camera.size = Size(scale * (max_x - min_x), scale * (max_y - min_y));
+    camera.size = Size(scale * (max_x - min_x) / zoom, scale * (max_y - min_y) / zoom);
     return camera;
 }
 
@@ -151,6 +171,9 @@ void init_filter(KalmanFilter &filter) {
 FrameSourceWarp::FrameSourceWarp(
     std::shared_ptr<FrameSource> source,
     CameraPreset input_camera,
+    double scale,
+    bool crop_borders,
+    double zoom,
     int smooth_radius
 ):
     m_source(source),
@@ -163,7 +186,7 @@ FrameSourceWarp::FrameSourceWarp(
         input_camera,
         Size(first_frame.cols, first_frame.rows * 2 / 3)
     );
-    m_output_camera = get_output_camera(m_input_camera, 0.5);
+    m_output_camera = get_output_camera(m_input_camera, scale, crop_borders, zoom);
 
     fisheye::initUndistortRectifyMap(
         m_input_camera.matrix,
