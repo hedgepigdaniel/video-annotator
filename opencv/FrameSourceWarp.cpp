@@ -409,10 +409,15 @@ void FrameSourceWarp::consume_frame(UMat input_frame) {
         // Calculate the camera rotation since the last frame with RANSAC
         Mat rotation_since_last_frame;
         int num_inliers = guess_camera_rotation(point_pairs.first, point_pairs.second, rotation_since_last_frame);
-        if (num_inliers < 20) {
-            rotation_since_last_frame = Mat::eye(3, 3, CV_64F);
+        if (num_inliers < 40) {
+            if (m_frame_index == 0) {
+                rotation_since_last_frame = Mat::eye(3, 3, CV_64F);
+            } else {
+                rotation_since_last_frame = m_last_frame_rotation;
+            }
         }
 
+        m_last_frame_rotation = rotation_since_last_frame;
         Mat accumulated_rotation = rotation_since_last_frame * m_measured_rotation;
         m_measured_rotation = accumulated_rotation;
 

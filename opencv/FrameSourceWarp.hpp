@@ -66,6 +66,7 @@ class FrameSourceWarp: public FrameSource {
     gram_sg::RotationFilter m_rotation_filter;
     std::queue<cv::UMat> m_buffered_frames;
     std::queue<cv::Mat> m_buffered_rotations;
+    cv::Mat m_last_frame_rotation;
 
     // The last input frame for which corners were detected from scratch
     long m_last_key_frame_index = -1;
