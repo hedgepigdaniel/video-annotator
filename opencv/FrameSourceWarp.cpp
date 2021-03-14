@@ -174,11 +174,15 @@ FrameSourceWarp::FrameSourceWarp(
     double scale,
     bool crop_borders,
     double zoom,
-    int smooth_radius
+    int smooth_radius,
+    bool single_interpolation,
+    InterpolationFlags interpolation
 ):
     m_source(source),
     m_measured_rotation(Mat::eye(3, 3, CV_64F)),
     m_smooth_radius(smooth_radius),
+    m_single_interpolation(single_interpolation),
+    m_interpolation(interpolation),
     m_rotation_filter(RotationFilter(SavitzkyGolayFilterConfig(smooth_radius, 0, 2, 0)))
 {
     UMat first_frame = m_source->peek_frame();
@@ -245,15 +249,46 @@ pair<vector<Point2f>, vector<Point2f>> find_point_pairs_with_optical_flow(
     return pair<vector<Point2f>, vector<Point2f>>(prev_points, current_points);
 }
 
-UMat FrameSourceWarp::change_projection(UMat input_camera_frame) {
+UMat FrameSourceWarp::warp_frame(UMat input_camera_frame, Mat rotation) {
     UMat output_camera_frame;
-    remap(
-        input_camera_frame,
-        output_camera_frame,
-        m_camera_map_1,
-        m_camera_map_2,
-        INTERPOLATION
-    );
+    if (m_single_interpolation) {
+        // Map output pixels to the input frame
+        UMat map_x, map_y;
+        fisheye::initUndistortRectifyMap(
+            m_input_camera.matrix,
+            m_input_camera.distortion_coefficients,
+            rotation,
+            m_output_camera.matrix,
+            m_output_camera.size,
+            CV_32FC1,
+            map_x,
+            map_y
+        );
+
+        remap(
+            input_camera_frame,
+            output_camera_frame,
+            map_x,
+            map_y,
+            m_interpolation
+        );
+    } else {
+        UMat undistorted_frame;
+        remap(
+            input_camera_frame,
+            undistorted_frame,
+            m_camera_map_1,
+            m_camera_map_2,
+            m_interpolation
+        );
+        warpPerspective(
+            undistorted_frame,
+            output_camera_frame,
+            m_output_camera.matrix * rotation * m_output_camera.matrix.inv(),
+            m_output_camera.size,
+            m_interpolation
+        );
+    }
     return output_camera_frame;
 }
 
@@ -327,14 +362,11 @@ Mat cv_mat_from_eigen_mat(Eigen::Matrix3d eigen_mat) {
     return cv_mat;
 }
 
-void FrameSourceWarp::warp_frame(UMat input_frame) {
+void FrameSourceWarp::consume_frame(UMat input_frame) {
     // Create grayscale and BGR versions
     UMat frame_gray(input_frame, Rect(0, 0, input_frame.cols, input_frame.rows * 2 / 3));
     UMat output_frame;
     cvtColor(input_frame, output_frame, COLOR_YUV2BGR_NV12);
-
-    // Change projection
-    output_frame = change_projection(output_frame);
 
     if (m_last_key_frame_index == -1) {
         // This is the first frame
@@ -378,7 +410,7 @@ void FrameSourceWarp::warp_frame(UMat input_frame) {
 UMat FrameSourceWarp::pull_frame() {
     while(m_buffered_frames.size() < m_smooth_radius) {
         try {
-            warp_frame(m_source->pull_frame());
+            consume_frame(m_source->pull_frame());
         } catch (int err) {
             if (err == EOF) {
                 break;
@@ -393,18 +425,10 @@ UMat FrameSourceWarp::pull_frame() {
     UMat frame = m_buffered_frames.front();
     Mat measured_rotation = m_buffered_rotations.front();
     Mat corrected_rotation = cv_mat_from_eigen_mat(m_rotation_filter.filter());
-    Mat correction = corrected_rotation * measured_rotation.inv();
-    UMat output_frame;
-    warpPerspective(
-        frame,
-        output_frame,
-        m_output_camera.matrix * correction * m_output_camera.matrix.inv(),
-        output_frame.size(),
-        INTERPOLATION
-    );
+    Mat rotation_correction = corrected_rotation * measured_rotation.inv();
     m_buffered_frames.pop();
     m_buffered_rotations.pop();
-    return output_frame;
+    return warp_frame(frame, rotation_correction);
 }
 
 UMat FrameSourceWarp::peek_frame() {

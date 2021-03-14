@@ -43,30 +43,39 @@ class FrameSourceWarp: public FrameSource {
     Camera m_input_camera;
 
     // Optimized pixel mapping table from output camera to input camera
-    cv::Mat m_camera_map_1;
-    cv::Mat m_camera_map_2;
+    cv::UMat m_camera_map_1;
+    cv::UMat m_camera_map_2;
 
     // Properties of the output camera
     Camera m_output_camera;
 
+    // Current frame index
     long m_frame_index = 0;
 
     // The last input frame
     cv::UMat m_last_input_frame;
     cv::Mat m_measured_rotation;
+    std::vector<cv::Point2f> m_last_input_frame_corners;
+
+    // Settings
     unsigned int m_smooth_radius;
+    bool m_single_interpolation;
+    cv::InterpolationFlags m_interpolation;
+
+    // Stabilization lookahead buffer
     gram_sg::RotationFilter m_rotation_filter;
     std::queue<cv::UMat> m_buffered_frames;
     std::queue<cv::Mat> m_buffered_rotations;
 
-    std::vector<cv::Point2f> m_last_input_frame_corners;
-
     // The last input frame for which corners were detected from scratch
     long m_last_key_frame_index = -1;
 
-    void warp_frame(cv::UMat input_frame);
-    cv::UMat change_projection(cv::UMat input);
-    cv::Mat guess_camera_rotation(std::vector<cv::Point2f> points_prev, std::vector<cv::Point2f> points_current);
+    void consume_frame(cv::UMat input_frame);
+    cv::UMat warp_frame(cv::UMat input, cv::Mat rotation);
+    cv::Mat guess_camera_rotation(
+      std::vector<cv::Point2f> points_prev,
+      std::vector<cv::Point2f> points_current
+    );
   public:
     FrameSourceWarp(
       std::shared_ptr<FrameSource> source,
@@ -74,7 +83,9 @@ class FrameSourceWarp: public FrameSource {
       double scale = 1,
       bool crop_borders = false,
       double zoom = 1,
-      int smooth_radius = 30
+      int smooth_radius = 30,
+      bool single_interpolation = false,
+      cv::InterpolationFlags interpolation = cv::INTER_LINEAR
     );
     cv::UMat pull_frame();
     cv::UMat peek_frame();
