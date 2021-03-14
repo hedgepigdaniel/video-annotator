@@ -413,6 +413,8 @@ UMat FrameSourceWarp::pull_frame() {
             consume_frame(m_source->pull_frame());
         } catch (int err) {
             if (err == EOF) {
+                // Pretend the camera kept moving the same way after the last frame
+                m_rotation_filter.add(eigen_mat_from_cv_mat(m_measured_rotation));
                 break;
             }
             throw err;
