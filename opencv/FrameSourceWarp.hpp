@@ -72,9 +72,10 @@ class FrameSourceWarp: public FrameSource {
 
     void consume_frame(cv::UMat input_frame);
     cv::UMat warp_frame(cv::UMat input, cv::Mat rotation);
-    cv::Mat guess_camera_rotation(
+    int guess_camera_rotation(
       std::vector<cv::Point2f> points_prev,
-      std::vector<cv::Point2f> points_current
+      std::vector<cv::Point2f> points_current,
+      cv::OutputArray rotation
     );
   public:
     FrameSourceWarp(

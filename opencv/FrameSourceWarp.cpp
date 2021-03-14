@@ -209,7 +209,6 @@ FrameSourceWarp::FrameSourceWarp(
 vector<Point2f> find_corners(UMat image) {
     vector <Point2f> corners;
     goodFeaturesToTrack(image, corners, 200, 0.01, 30);
-    std::cerr << "Found " << corners.size() << " corners\n";
 
     // // Display corners
     // UMat frame_display = frame_gray.clone();
@@ -294,7 +293,11 @@ UMat FrameSourceWarp::warp_frame(UMat input_camera_frame, Mat rotation) {
     return output_camera_frame;
 }
 
-Mat FrameSourceWarp::guess_camera_rotation(vector<Point2f> points_prev, vector<Point2f> points_current) {
+int FrameSourceWarp::guess_camera_rotation(
+    vector<Point2f> points_prev,
+    vector<Point2f> points_current,
+    OutputArray &rotation
+) {
     vector<Point2f> corners_output;
     fisheye::undistortPoints(
         points_current,
@@ -314,7 +317,7 @@ Mat FrameSourceWarp::guess_camera_rotation(vector<Point2f> points_prev, vector<P
         m_input_camera.distortion_coefficients
     );
 
-    Mat rotation, translation;
+    Mat rotation_vector, translation;
     vector<Point3d> last_frame_corner_coordinates;
     for (size_t i = 0; i < prev_corners_identity.size(); ++i) {
         // Add noise to change the depth of each point. This prevents
@@ -326,22 +329,29 @@ Mat FrameSourceWarp::guess_camera_rotation(vector<Point2f> points_prev, vector<P
             scale
         ));
     }
+    vector<int> inliers;
     try {
         solvePnPRansac(
             last_frame_corner_coordinates,
             corners_output,
             m_output_camera.matrix,
             m_output_camera.distortion_coefficients,
-            rotation,
-            translation
+            rotation_vector,
+            translation,
+            false,
+            100,
+            8.0,
+            0.99,
+            inliers
         );
     } catch (cv::Exception &e) {
         cerr << "solvePnPRansac failed!" << endl;
-        return Mat::eye(3, 3, CV_64F);
+        rotation.assign(Mat::eye(3, 3, CV_64F));
+        return 0;
     }
 
-    Rodrigues(rotation, rotation);
-    return rotation;
+    Rodrigues(rotation_vector, rotation);
+    return inliers.size();
 }
 
 Eigen::Matrix3d eigen_mat_from_cv_mat (Mat cv_mat) {
@@ -397,7 +407,12 @@ void FrameSourceWarp::consume_frame(UMat input_frame) {
         m_last_input_frame_corners = point_pairs.second;
 
         // Calculate the camera rotation since the last frame with RANSAC
-        Mat rotation_since_last_frame = guess_camera_rotation(point_pairs.first, point_pairs.second);
+        Mat rotation_since_last_frame;
+        int num_inliers = guess_camera_rotation(point_pairs.first, point_pairs.second, rotation_since_last_frame);
+        if (num_inliers < 20) {
+            rotation_since_last_frame = Mat::eye(3, 3, CV_64F);
+        }
+
         Mat accumulated_rotation = rotation_since_last_frame * m_measured_rotation;
         m_measured_rotation = accumulated_rotation;
 
