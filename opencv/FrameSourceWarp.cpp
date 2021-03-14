@@ -16,8 +16,10 @@ const int INTERPOLATION = INTER_LINEAR;
 
 // Published values from
 // https://community.gopro.com/t5/en/HERO4-Field-of-View-FOV-Information/ta-p/390285
-const int GOPRO_H4B_FOV_H_NOSTAB = 122.6;
-const int GOPRO_H4B_FOV_V_NOSTAB = 94.4;
+const int GOPRO_H5B_FOV_H_43W_NOSTAB = 122.6;
+const int GOPRO_H5B_FOV_V_43W_NOSTAB = 94.4;
+const int GOPRO_H5B_FOV_H_169W_NOSTAB = 118.2;
+const int GOPRO_H5B_FOV_V_169W_NOSTAB = 69.5;
 
 Camera get_preset_camera(CameraPreset preset, Size input_size) {
     Mat camera_matrix = Mat::eye(3, 3, CV_64F);
@@ -31,12 +33,16 @@ Camera get_preset_camera(CameraPreset preset, Size input_size) {
 
     switch (preset) {
         case GOPRO_H4B_WIDE43_PUBLISHED:
-            camera_matrix.at<double>(0, 2) = (input_size.width - 1.) / 2;
-            camera_matrix.at<double>(1, 2) = (input_size.height - 1.) / 2;
             camera_matrix.at<double>(0, 0) = input_size.width /
-                (2 * atan ((GOPRO_H4B_FOV_H_NOSTAB / 2) * CV_PI / 180)); // 1171.95
+                (GOPRO_H5B_FOV_H_43W_NOSTAB * CV_PI / 180);
             camera_matrix.at<double>(1, 1) = input_size.height /
-                (2 * atan ((GOPRO_H4B_FOV_V_NOSTAB / 2) * CV_PI / 180)); // 1044.87
+                (GOPRO_H5B_FOV_V_43W_NOSTAB * CV_PI / 180);
+            break;
+        case GOPRO_H4B_WIDE169_PUBLISHED:
+            camera_matrix.at<double>(0, 0) = input_size.width /
+                (GOPRO_H5B_FOV_H_169W_NOSTAB * CV_PI / 180);
+            camera_matrix.at<double>(1, 1) = input_size.height /
+                (GOPRO_H5B_FOV_V_169W_NOSTAB * CV_PI / 180);
             break;
         case GOPRO_H4B_WIDE43_MEASURED:
             // Measured values for GoPro Hero 4 Black with 4:3 "Wide" FOV setting and stabilisation disabled
