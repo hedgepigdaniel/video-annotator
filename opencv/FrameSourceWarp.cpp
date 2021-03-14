@@ -94,10 +94,10 @@ Camera get_output_camera(Camera input_camera, double scale) {
             Point2d(input_size.width - 1, input_size.height - 1),
 
             // midpoint of edges
-            Point2d((input_size.width - 1.) / 2, 0),
-            Point2d(input_size.width - 1, (input_size.height - 1.) / 2),
-            Point2d((input_size.width - 1.) / 2, input_size.height - 1),
-            Point2d(0, (input_size.height - 1.) / 2),
+            Point2d(input_camera.matrix(0, 2), 0),
+            Point2d(input_size.width - 1, input_camera.matrix(1, 2)),
+            Point2d(input_camera.matrix(0, 2), input_size.height - 1),
+            Point2d(0, input_camera.matrix(1, 2)),
         }),
         extreme_points,
         input_camera.matrix,
