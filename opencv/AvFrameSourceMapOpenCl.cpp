@@ -63,6 +63,7 @@ AVFrame* AvFrameSourceMapOpenCl::opencl_frame_from_vaapi_frame(AVFrame *vaapi_fr
         throw err;
     }
 
+    av_frame_free(&tmp_frame);
     return ocl_frame;
 }
 
