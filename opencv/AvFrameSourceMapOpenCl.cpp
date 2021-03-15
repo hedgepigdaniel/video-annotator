@@ -12,6 +12,21 @@ AvFrameSourceMapOpenCl::AvFrameSourceMapOpenCl(
 ) {
     this->source = source;
     this->ocl_device_ctx = ocl_device_ctx;
+    AVFrame *vaapi_frame = this->source->peek_frame();
+    this->hw_frames_ref = av_hwframe_ctx_alloc(this->ocl_device_ctx.get());
+    AVHWFramesContext * ocl_hw_frames_ctx = (AVHWFramesContext *)(this->hw_frames_ref->data);
+    ocl_hw_frames_ctx->format = AV_PIX_FMT_OPENCL;
+    ocl_hw_frames_ctx->sw_format = AV_PIX_FMT_NV12;
+    ocl_hw_frames_ctx->width = vaapi_frame->width;
+    ocl_hw_frames_ctx->height = vaapi_frame->height;
+    ocl_hw_frames_ctx->initial_pool_size = 40;
+
+    int err = av_hwframe_ctx_init(this->hw_frames_ref);
+    if (err < 0) {
+        cerr << "Failed init context OpenCL frame:" << errString(err) << "\n";
+        av_buffer_unref(&this->hw_frames_ref);
+        throw err;
+    }
 }
 
 AVFrame* AvFrameSourceMapOpenCl::opencl_frame_from_vaapi_frame(AVFrame *vaapi_frame) {
@@ -30,20 +45,6 @@ AVFrame* AvFrameSourceMapOpenCl::opencl_frame_from_vaapi_frame(AVFrame *vaapi_fr
     AVFrame *ocl_frame = av_frame_alloc();
     if (ocl_frame == NULL) {
         cerr << "Failed to allocate OpenCL frame\n";
-    }
-
-    AVBufferRef *hw_frames_ref = av_hwframe_ctx_alloc(this->ocl_device_ctx.get());
-    AVHWFramesContext * ocl_hw_frames_ctx = (AVHWFramesContext *)(hw_frames_ref->data);
-    ocl_hw_frames_ctx->format = AV_PIX_FMT_OPENCL;
-    ocl_hw_frames_ctx->sw_format = AV_PIX_FMT_NV12;
-    ocl_hw_frames_ctx->width = vaapi_frame->width;
-    ocl_hw_frames_ctx->height = vaapi_frame->height;
-    ocl_hw_frames_ctx->initial_pool_size = 40;
-    err = av_hwframe_ctx_init(hw_frames_ref);
-    if (err < 0) {
-        cerr << "Failed init context OpenCL frame:" << errString(err) << "\n";
-        av_buffer_unref(&hw_frames_ref);
-        throw err;
     }
 
     err = av_hwframe_get_buffer(hw_frames_ref, ocl_frame, 0);

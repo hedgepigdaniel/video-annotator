@@ -14,6 +14,7 @@ class AvFrameSourceMapOpenCl: public AvFrameSource {
     std::shared_ptr<AvFrameSource> source;
     std::shared_ptr<AVBufferRef> ocl_device_ctx = NULL;
     AVFrame* opencl_frame_from_vaapi_frame(AVFrame *vaapi_frame);
+    AVBufferRef *hw_frames_ref;
   public:
     AvFrameSourceMapOpenCl(
       std::shared_ptr<AvFrameSource> source,
