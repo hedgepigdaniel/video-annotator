@@ -54,13 +54,14 @@ AVBufferRef* create_vaapi_context() {
 AVBufferRef* create_opencl_context_from_vaapi(AVBufferRef *vaapi_device_ctx) {
     AVBufferRef *opencl_device_ctx = NULL;
     int ret;
-    ret = av_hwdevice_ctx_create_derived(
+    ret = av_hwdevice_ctx_create(
         &opencl_device_ctx,
         AV_HWDEVICE_TYPE_OPENCL,
-        vaapi_device_ctx,
+        "1.0",
+        NULL,
         0
     );
-    if (ret < 0) {
+    if (ret < 0 || opencl_device_ctx == NULL) {
         cerr << "Failed to map VAAPI device to OpenCL device:" << errString(ret) << "\n";
         throw ret;
     }
