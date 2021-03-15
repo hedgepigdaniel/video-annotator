@@ -16,30 +16,49 @@ AvFrameSourceMapOpenCl::AvFrameSourceMapOpenCl(
 
 AVFrame* AvFrameSourceMapOpenCl::opencl_frame_from_vaapi_frame(AVFrame *vaapi_frame) {
     int err;
+    AVFrame *tmp_frame = av_frame_alloc();
+    if (tmp_frame == NULL) {
+        cerr << "Failed to allocate temp frame\n";
+    }
+
+    err = av_hwframe_transfer_data(tmp_frame, vaapi_frame, 0);
+    if (err) {
+        cerr << "Failed to copy VAAPI frames to memory:" << errString(err) << "\n";
+        throw err;
+    }
+
     AVFrame *ocl_frame = av_frame_alloc();
     if (ocl_frame == NULL) {
         cerr << "Failed to allocate OpenCL frame\n";
     }
-    AVBufferRef *ocl_hw_frames_ctx = NULL;
 
-    err = av_hwframe_ctx_create_derived(
-        &ocl_hw_frames_ctx,
-        AV_PIX_FMT_OPENCL,
-        this->ocl_device_ctx.get(),
-        vaapi_frame->hw_frames_ctx,
-        AV_HWFRAME_MAP_DIRECT
-    );
-    if (err) {
-        cerr << "Failed to map hwframes context to OpenCL:" << errString(err) << "\n";
+    AVBufferRef *hw_frames_ref = av_hwframe_ctx_alloc(this->ocl_device_ctx.get());
+    AVHWFramesContext * ocl_hw_frames_ctx = (AVHWFramesContext *)(hw_frames_ref->data);
+    ocl_hw_frames_ctx->format = AV_PIX_FMT_OPENCL;
+    ocl_hw_frames_ctx->sw_format = AV_PIX_FMT_NV12;
+    ocl_hw_frames_ctx->width = vaapi_frame->width;
+    ocl_hw_frames_ctx->height = vaapi_frame->height;
+    ocl_hw_frames_ctx->initial_pool_size = 40;
+    err = av_hwframe_ctx_init(hw_frames_ref);
+    if (err < 0) {
+        cerr << "Failed init context OpenCL frame:" << errString(err) << "\n";
+        av_buffer_unref(&hw_frames_ref);
         throw err;
     }
 
-    ocl_frame->hw_frames_ctx = ocl_hw_frames_ctx;
-    ocl_frame->format = AV_PIX_FMT_OPENCL;
-
-    err = av_hwframe_map(ocl_frame, vaapi_frame, AV_HWFRAME_MAP_READ);
+    err = av_hwframe_get_buffer(hw_frames_ref, ocl_frame, 0);
     if (err) {
-        cerr << "Failed to map hardware frames:" << errString(err) << "\n";
+        cerr << "Failed to get buffer for OpenCL frame:" << errString(err) << "\n";
+        throw err;
+    }
+    if (!ocl_frame->hw_frames_ctx) {
+        cerr << "Failed to get buffer for OpenCL frame\n";
+        throw AVERROR(ENOMEM);
+    }
+
+    err = av_hwframe_transfer_data(ocl_frame, tmp_frame, 0);
+    if (err) {
+        cerr << "Failed to copy memory to OpenCL frames:" << errString(err) << "\n";
         throw err;
     }
 
