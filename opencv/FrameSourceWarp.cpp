@@ -410,7 +410,7 @@ void FrameSourceWarp::consume_frame(UMat input_frame) {
         Mat rotation_since_last_frame;
         int num_inliers = guess_camera_rotation(point_pairs.first, point_pairs.second, rotation_since_last_frame);
         if (num_inliers < 40) {
-            if (m_frame_index == 0) {
+            if (m_last_frame_rotation.empty()) {
                 rotation_since_last_frame = Mat::eye(3, 3, CV_64F);
             } else {
                 rotation_since_last_frame = m_last_frame_rotation;
