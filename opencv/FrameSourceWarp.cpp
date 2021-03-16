@@ -194,6 +194,7 @@ FrameSourceWarp::FrameSourceWarp(
     );
     m_output_camera = get_output_camera(m_input_camera, scale, crop_borders, zoom);
 
+    Mat map_1, map_2;
     fisheye::initUndistortRectifyMap(
         m_input_camera.matrix,
         m_input_camera.distortion_coefficients,
@@ -201,9 +202,11 @@ FrameSourceWarp::FrameSourceWarp(
         m_output_camera.matrix,
         m_output_camera.size,
         CV_16SC2,
-        m_camera_map_1,
-        m_camera_map_2
+        map_1,
+        map_2
     );
+    m_camera_map_1 = map_1.getUMat(ACCESS_READ, USAGE_ALLOCATE_DEVICE_MEMORY);
+    m_camera_map_2 = map_2.getUMat(ACCESS_READ, USAGE_ALLOCATE_DEVICE_MEMORY);
 }
 
 vector<Point2f> find_corners(UMat image) {
@@ -254,7 +257,8 @@ UMat FrameSourceWarp::warp_frame(UMat input_camera_frame, Mat rotation) {
     UMat output_camera_frame;
     if (m_single_interpolation) {
         // Map output pixels to the input frame
-        UMat map_x, map_y;
+        // This does lots of random access which is extremely slow on discrete GPU memory
+        Mat map_x, map_y;
         fisheye::initUndistortRectifyMap(
             m_input_camera.matrix,
             m_input_camera.distortion_coefficients,
