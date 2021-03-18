@@ -1,6 +1,6 @@
 __kernel void createMap(
-    __global float *out_map_x, short map_x_step, short map_x_offset, short map_rows, short map_cols,
-    __global float *out_map_y, short map_y_step, short map_y_offset,
+    __global float *out_map_x, int map_x_step, int map_x_offset, int map_rows, int map_cols,
+    __global float *out_map_y, int map_y_step, int map_y_offset,
     float src_center_x, float src_center_y, float src_focal_x, float src_focal_y,
     float map_center_x, float map_center_y, float map_focal_x, float map_focal_y,
     float rot00, float rot01, float rot02,

@@ -6,6 +6,8 @@
 #include <math.h>
 #include <cstdlib>
 
+#include <CL/opencl.hpp>
+
 #include <opencv2/calib3d.hpp>
 #include <opencv2/video/tracking.hpp>
 
@@ -278,23 +280,23 @@ UMat FrameSourceWarp::warp_frame(UMat input_camera_frame, Mat rotation) {
     ocl::Kernel kernel_with_args = m_remap_kernel.args(
         map_x_args,
         map_y_args,
-        (float) m_input_camera.matrix(0, 2),
-        (float) m_input_camera.matrix(1, 2),
-        (float) m_input_camera.matrix(0, 0),
-        (float) m_input_camera.matrix(1, 1),
-        (float) m_output_camera.matrix(0, 2),
-        (float) m_output_camera.matrix(1, 2),
-        (float) m_output_camera.matrix(0, 0),
-        (float) m_output_camera.matrix(1, 1),
-        (float) rotation.at<double>(0, 0),
-        (float) rotation.at<double>(0, 1),
-        (float) rotation.at<double>(0, 2),
-        (float) rotation.at<double>(1, 0),
-        (float) rotation.at<double>(1, 1),
-        (float) rotation.at<double>(1, 2),
-        (float) rotation.at<double>(2, 0),
-        (float) rotation.at<double>(2, 1),
-        (float) rotation.at<double>(2, 2)
+        (cl_float) m_input_camera.matrix(0, 2),
+        (cl_float) m_input_camera.matrix(1, 2),
+        (cl_float) m_input_camera.matrix(0, 0),
+        (cl_float) m_input_camera.matrix(1, 1),
+        (cl_float) m_output_camera.matrix(0, 2),
+        (cl_float) m_output_camera.matrix(1, 2),
+        (cl_float) m_output_camera.matrix(0, 0),
+        (cl_float) m_output_camera.matrix(1, 1),
+        (cl_float) rotation.at<double>(0, 0),
+        (cl_float) rotation.at<double>(0, 1),
+        (cl_float) rotation.at<double>(0, 2),
+        (cl_float) rotation.at<double>(1, 0),
+        (cl_float) rotation.at<double>(1, 1),
+        (cl_float) rotation.at<double>(1, 2),
+        (cl_float) rotation.at<double>(2, 0),
+        (cl_float) rotation.at<double>(2, 1),
+        (cl_float) rotation.at<double>(2, 2)
     );
     if (!kernel_with_args.run(2, global_size, NULL, true)) {
         std::cerr << "executing kernel failed" << std::endl;
