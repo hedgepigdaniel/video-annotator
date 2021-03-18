@@ -6,6 +6,7 @@
 #include <queue>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/core/ocl.hpp>
 #include <gram_savitzky_golay/spatial_filters.h>
 
 #include "FrameSource.hpp"
@@ -43,8 +44,9 @@ class FrameSourceWarp: public FrameSource {
     Camera m_input_camera;
 
     // Optimized pixel mapping table from output camera to input camera
-    cv::UMat m_camera_map_1;
-    cv::UMat m_camera_map_2;
+    cv::UMat m_map_x;
+    cv::UMat m_map_y;
+    cv::ocl::Kernel m_remap_kernel;
 
     // Properties of the output camera
     Camera m_output_camera;
@@ -59,7 +61,6 @@ class FrameSourceWarp: public FrameSource {
 
     // Settings
     unsigned int m_smooth_radius;
-    bool m_single_interpolation;
     cv::InterpolationFlags m_interpolation;
 
     // Stabilization lookahead buffer
@@ -86,7 +87,6 @@ class FrameSourceWarp: public FrameSource {
       bool crop_borders = false,
       double zoom = 1,
       int smooth_radius = 30,
-      bool single_interpolation = false,
       cv::InterpolationFlags interpolation = cv::INTER_LINEAR
     );
     cv::UMat pull_frame();
