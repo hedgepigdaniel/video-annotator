@@ -1,8 +1,12 @@
 #include "FrameSourceWarp.hpp"
 
 #include <iostream>
+#include <fstream>
+#include <cerrno>
 #include <math.h>
 #include <cstdlib>
+
+#include <CL/opencl.hpp>
 
 #include <opencv2/calib3d.hpp>
 #include <opencv2/video/tracking.hpp>
@@ -170,6 +174,28 @@ void init_filter(KalmanFilter &filter) {
     filter.transitionMatrix.at<float>(0, 1) = 1;
 }
 
+string read_string_from_file(string file_name) {
+    ifstream kernel_stream(file_name, ios::in | ios::binary);
+    if (kernel_stream.fail()) {
+        cerr << "Failed to open file \"" << file_name << "\": " << strerror(errno) << endl;
+        throw(errno);
+    }
+    return string((istreambuf_iterator<char>(kernel_stream)), istreambuf_iterator<char>());
+}
+
+ocl::Program read_opencl_program_from_file(string file_name, string program_opts) {
+    ocl::ProgramSource program_source(read_string_from_file(file_name));
+    ocl::Context context = ocl::Context::getDefault(false);
+    string err;
+    ocl::Program program = context.getProg(program_source, program_opts, err);
+    if (!err.empty()) {
+        cerr << "Failed to read OpenCL program from file " << file_name <<
+            " with opts \"" << program_opts << "\":\n" << err << endl;
+        throw err;
+    }
+    return program;
+}
+
 FrameSourceWarp::FrameSourceWarp(
     std::shared_ptr<FrameSource> source,
     CameraPreset input_camera,
@@ -177,13 +203,11 @@ FrameSourceWarp::FrameSourceWarp(
     bool crop_borders,
     double zoom,
     int smooth_radius,
-    bool single_interpolation,
     InterpolationFlags interpolation
 ):
     m_source(source),
     m_measured_rotation(Mat::eye(3, 3, CV_64F)),
     m_smooth_radius(smooth_radius),
-    m_single_interpolation(single_interpolation),
     m_interpolation(interpolation),
     m_rotation_filter(RotationFilter(SavitzkyGolayFilterConfig(smooth_radius, 0, 2, 0)))
 {
@@ -194,16 +218,11 @@ FrameSourceWarp::FrameSourceWarp(
     );
     m_output_camera = get_output_camera(m_input_camera, scale, crop_borders, zoom);
 
-    fisheye::initUndistortRectifyMap(
-        m_input_camera.matrix,
-        m_input_camera.distortion_coefficients,
-        Mat::eye(3, 3, CV_64F),
-        m_output_camera.matrix,
-        m_output_camera.size,
-        CV_16SC2,
-        m_camera_map_1,
-        m_camera_map_2
-    );
+
+    m_map_x = UMat(m_output_camera.size, CV_32F);
+    m_map_y = UMat(m_output_camera.size, CV_32F);
+    ocl::Program program = read_opencl_program_from_file("createMap.cl", "");
+    m_remap_kernel = ocl::Kernel("createMap", program);
 }
 
 vector<Point2f> find_corners(UMat image) {
@@ -252,44 +271,45 @@ pair<vector<Point2f>, vector<Point2f>> find_point_pairs_with_optical_flow(
 
 UMat FrameSourceWarp::warp_frame(UMat input_camera_frame, Mat rotation) {
     UMat output_camera_frame;
-    if (m_single_interpolation) {
-        // Map output pixels to the input frame
-        UMat map_x, map_y;
-        fisheye::initUndistortRectifyMap(
-            m_input_camera.matrix,
-            m_input_camera.distortion_coefficients,
-            rotation,
-            m_output_camera.matrix,
-            m_output_camera.size,
-            CV_32FC1,
-            map_x,
-            map_y
-        );
 
-        remap(
-            input_camera_frame,
-            output_camera_frame,
-            map_x,
-            map_y,
-            m_interpolation
-        );
-    } else {
-        UMat undistorted_frame;
-        remap(
-            input_camera_frame,
-            undistorted_frame,
-            m_camera_map_1,
-            m_camera_map_2,
-            m_interpolation
-        );
-        warpPerspective(
-            undistorted_frame,
-            output_camera_frame,
-            m_output_camera.matrix * rotation * m_output_camera.matrix.inv(),
-            m_output_camera.size,
-            m_interpolation
-        );
+    ocl::KernelArg map_x_args = cv::ocl::KernelArg::WriteOnly(m_map_x, m_map_x.channels());
+    ocl::KernelArg map_y_args = cv::ocl::KernelArg::WriteOnlyNoSize(m_map_y, m_map_y.channels());
+
+    size_t global_size[2] = { (size_t) m_map_x.cols, (size_t) m_map_x.rows };
+    // rotation = Mat::eye(3, 3, CV_64F);
+    ocl::Kernel kernel_with_args = m_remap_kernel.args(
+        map_x_args,
+        map_y_args,
+        (cl_float) m_input_camera.matrix(0, 2),
+        (cl_float) m_input_camera.matrix(1, 2),
+        (cl_float) m_input_camera.matrix(0, 0),
+        (cl_float) m_input_camera.matrix(1, 1),
+        (cl_float) m_output_camera.matrix(0, 2),
+        (cl_float) m_output_camera.matrix(1, 2),
+        (cl_float) m_output_camera.matrix(0, 0),
+        (cl_float) m_output_camera.matrix(1, 1),
+        (cl_float) rotation.at<double>(0, 0),
+        (cl_float) rotation.at<double>(0, 1),
+        (cl_float) rotation.at<double>(0, 2),
+        (cl_float) rotation.at<double>(1, 0),
+        (cl_float) rotation.at<double>(1, 1),
+        (cl_float) rotation.at<double>(1, 2),
+        (cl_float) rotation.at<double>(2, 0),
+        (cl_float) rotation.at<double>(2, 1),
+        (cl_float) rotation.at<double>(2, 2)
+    );
+    if (!kernel_with_args.run(2, global_size, NULL, true)) {
+        std::cerr << "executing kernel failed" << std::endl;
+        throw -1;
     }
+
+    remap(
+        input_camera_frame,
+        output_camera_frame,
+        m_map_x,
+        m_map_y,
+        m_interpolation
+    );
     return output_camera_frame;
 }
 
@@ -410,7 +430,7 @@ void FrameSourceWarp::consume_frame(UMat input_frame) {
         Mat rotation_since_last_frame;
         int num_inliers = guess_camera_rotation(point_pairs.first, point_pairs.second, rotation_since_last_frame);
         if (num_inliers < 40) {
-            if (m_frame_index == 0) {
+            if (m_last_frame_rotation.empty()) {
                 rotation_since_last_frame = Mat::eye(3, 3, CV_64F);
             } else {
                 rotation_since_last_frame = m_last_frame_rotation;
@@ -452,7 +472,7 @@ UMat FrameSourceWarp::pull_frame() {
     Mat rotation_correction = corrected_rotation * measured_rotation.inv();
     m_buffered_frames.pop();
     m_buffered_rotations.pop();
-    return warp_frame(frame, rotation_correction);
+    return warp_frame(frame, rotation_correction.inv());
 }
 
 UMat FrameSourceWarp::peek_frame() {

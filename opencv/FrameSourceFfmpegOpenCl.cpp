@@ -60,7 +60,7 @@ int convert_ocl_images_to_nv12_umat(cl_mem cl_luma, cl_mem cl_chroma, UMat& dst)
     cl_command_queue queue = (cl_command_queue) ocl::Queue::getDefault().ptr();
     size_t src_origin[3] = { 0, 0, 0 };
     size_t luma_region[3] = { luma_w, luma_h, 1 };
-    size_t chroma_region[3] = { chroma_w, chroma_h * 2, 1 };
+    size_t chroma_region[3] = { chroma_w, chroma_h, 1 };
     ret = clEnqueueCopyImageToBuffer(
         queue,
         cl_luma,
