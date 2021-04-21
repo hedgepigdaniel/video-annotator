@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 if [ $# != 4 ]; then
-	echo "Usage: $0 <opencl filter> <input> <output>"
+	echo "Usage: $0 <opencl filter> <intel|amd|nvidia> <input> <output>"
 	exit 1
 fi
 
@@ -49,8 +49,30 @@ elif [ $GPU = "nvidia" ]; then
 		h264_nvenc
 		-qp
 		19
-		"$OUTPUT"
 	)
+elif [ $GPU = "amd" ]; then
+	LIBVA_DRIVER_NAME=radeonsi
+	VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/amd_pro_x86_64.icd
+	INPUT_FLAGS=(
+		-init_hw_device
+		opencl=amd_opencl:2.0
+		-filter_hw_device
+		amd_opencl
+		-hwaccel
+		vaapi
+		-hwaccel_device
+		/dev/dri/renderD129
+	)
+	OUTPUT_FLAGS=(
+		-vf
+		"hwupload,$FILTER,hwdownload,format=nv12"
+		-c:v
+		h264_amf
+		-qp
+		19
+	)
+else
+	echo Unsupported GPU: $GPU
 fi
 
 $FFMPEG "${INPUT_FLAGS[@]}" -i "$INPUT" "${OUTPUT_FLAGS[@]}" -y "$OUTPUT"
