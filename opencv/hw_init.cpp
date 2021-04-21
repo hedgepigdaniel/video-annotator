@@ -147,11 +147,11 @@ void init_opencv_from_opencl_context(AVBufferRef *ocl_device_ctx) {
         string(platform_name.begin(), platform_name.end()) <<
         "\"\n";
 
-    ocl::Context::getDefault(false);
-    ocl::attachContext(
+    ocl::OpenCLExecutionContext context = ocl::OpenCLExecutionContext::create(
         platform_name.data(),
         platform,
         ocl_device_ocl_ctx->context,
         ocl_device_ocl_ctx->device_id
     );
+    context.bind();
 }

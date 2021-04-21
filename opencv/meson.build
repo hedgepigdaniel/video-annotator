@@ -30,7 +30,7 @@ display_image_sources = [
 libavformat = dependency('libavformat')
 libavcodec = dependency('libavcodec')
 libavutil = dependency('libavutil')
-opencv = dependency('opencv4')
+opencv = dependency('opencv4', version:'>= 4.5')
 opencl = dependency('OpenCL')
 libva_drm = dependency('libva-drm')
 gpmf_parser = dependency('gpmf-parser')
