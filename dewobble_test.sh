@@ -2,7 +2,7 @@
 
 set -x
 
-if [ $# != 4 ]; then
+if [ $# -lt 4 ]; then
 	echo "Usage: $0 <opencl filter> <intel|amd|nvidia> <input> <output>"
 	exit 1
 fi
@@ -11,6 +11,8 @@ FILTER=$1
 GPU=$2
 INPUT=$3
 OUTPUT=$4
+ARGV=("$@")
+FLAGS=("${@:5}")
 
 FFMPEG=./ffmpeg
 
@@ -48,6 +50,5 @@ else
 	echo Unsupported GPU: $GPU
 fi
 
-# gdb --args \
-$FFMPEG "${INPUT_FLAGS[@]}" -i "$INPUT" "${OUTPUT_FLAGS[@]}" -y -v verbose "$OUTPUT"
+"$FFMPEG" "${INPUT_FLAGS[@]}" -i "$INPUT" "${OUTPUT_FLAGS[@]}" -y "${FLAGS[@]}" "$OUTPUT"
 
