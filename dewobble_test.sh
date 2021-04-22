@@ -12,7 +12,7 @@ GPU=$2
 INPUT=$3
 OUTPUT=$4
 
-FFMPEG=~/code/oss/FFmpeg/ffmpeg
+FFMPEG=./ffmpeg
 
 
 if [ $GPU = "intel" ]; then
