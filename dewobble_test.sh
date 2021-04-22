@@ -15,13 +15,11 @@ FFMPEG=~/code/oss/FFmpeg/ffmpeg
 
 if [ $GPU = "intel" ]; then
 	INPUT_FLAGS=(
-		-init_hw_device vaapi=intel_vaapi:/dev/dri/renderD128
+		-init_hw_device vaapi=intel_vaapi:,driver=iHD,kernel_driver=i915
 		-hwaccel vaapi -hwaccel_device intel_vaapi -hwaccel_output_format vaapi
-		-init_hw_device opencl=intel_opencl@intel_vaapi
-		-filter_hw_device intel_opencl
 	)
 	OUTPUT_FLAGS=(
-		-vf "hwmap,$FILTER,hwmap=derive_device=vaapi:reverse=1"
+		-vf "hwmap=derive_device=opencl,$FILTER,hwmap=reverse=1"
 		-c:v h264_vaapi
 	)
 elif [ $GPU = "nvidia" ]; then
@@ -48,5 +46,6 @@ else
 	echo Unsupported GPU: $GPU
 fi
 
+# gdb --args \
 $FFMPEG "${INPUT_FLAGS[@]}" -i "$INPUT" "${OUTPUT_FLAGS[@]}" -y "$OUTPUT"
 
