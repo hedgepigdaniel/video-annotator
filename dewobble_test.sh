@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -x
+
 if [ $# != 4 ]; then
 	echo "Usage: $0 <opencl filter> <intel|amd|nvidia> <input> <output>"
 	exit 1
@@ -32,11 +34,11 @@ elif [ $GPU = "nvidia" ]; then
 		-c:v h264_nvenc -qp 19
 	)
 elif [ $GPU = "amd" ]; then
-	LIBVA_DRIVER_NAME=radeonsi
 	VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/amd_pro_x86_64.icd
 	INPUT_FLAGS=(
 		-init_hw_device opencl=amd_opencl:2.0 -filter_hw_device amd_opencl
-		-hwaccel vaapi -hwaccel_device /dev/dri/renderD129
+		-init_hw_device vaapi=amd_vaapi:,driver=radeonsi,kernel_driver=amdgpu
+		-hwaccel vaapi -hwaccel_device amd_vaapi
 	)
 	OUTPUT_FLAGS=(
 		-vf "hwupload,$FILTER,hwdownload,format=nv12"
@@ -47,5 +49,5 @@ else
 fi
 
 # gdb --args \
-$FFMPEG "${INPUT_FLAGS[@]}" -i "$INPUT" "${OUTPUT_FLAGS[@]}" -y "$OUTPUT"
+$FFMPEG "${INPUT_FLAGS[@]}" -i "$INPUT" "${OUTPUT_FLAGS[@]}" -y -v verbose "$OUTPUT"
 
