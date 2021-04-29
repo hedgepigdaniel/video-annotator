@@ -2,7 +2,7 @@
 
 set -x -e
 
-if [ $# -lt 4 ]; then
+if [ $# -lt 3 ]; then
 	echo "Usage: $0 <opencl filter> <intel|amd|nvidia> <input> <output>"
 	exit 1
 fi
@@ -10,9 +10,7 @@ fi
 FILTER=$1
 GPU=$2
 INPUT=$3
-OUTPUT=$4
-ARGV=("$@")
-FLAGS=("${@:5}")
+FLAGS=("${@:4}")
 
 FFMPEG=./ffmpeg
 
@@ -39,14 +37,23 @@ elif [ $GPU = "intelcomp" ]; then
 	OUT_CAMERA="out_p=rect:out_fl=1100"
 	HEIGHT=1520
 	BAND=160
+	FIXED=false
 	SMOOTHING=90
+	if $FIXED; then
+		STAB=fixed
+		TRIPOD=1
+	else
+		STAB=sg
+		TRIPOD=0
+	fi
 	OUTPUT_FLAGS=(
 		-filter_complex
-"[0:v]hwupload,split[hw1][hw2];"\
-"[hw1]dewobble_opencl=$IN_CAMERA:$OUT_CAMERA:stab=none[base];"\
-"[hw2]dewobble_opencl=$IN_CAMERA:out_h=$(($HEIGHT / 2 - $BAND / 2)):$OUT_CAMERA:out_fy=$(( $HEIGHT / 2 )):stab=sg:stab_r=$SMOOTHING[top];"\
-"[0:v]vidstabtransform=smoothing=$SMOOTHING:optzoom=0:crop=black,format=nv12,hwupload,dewobble_opencl=$IN_CAMERA:out_h=$(( $HEIGHT / 2 - $BAND / 2)):$OUT_CAMERA:out_fy=$(( -$BAND / 2)):stab=none[bottom];"\
-"[base][top]overlay_opencl[base2];"\
+"[0:v]hwupload,split=outputs=3[hw1][hw2][hw3];"\
+"[hw2]dewobble_opencl=$IN_CAMERA:$OUT_CAMERA:out_h=$BAND:stab=none[middle];"\
+"[hw3]dewobble_opencl=$IN_CAMERA:out_h=$(($HEIGHT / 2 - $BAND / 2)):$OUT_CAMERA:out_fy=$(( $HEIGHT / 2 )):stab=$STAB:stab_r=$SMOOTHING[top];"\
+"[0:v]vidstabtransform=smoothing=$SMOOTHING:optzoom=0:crop=black:tripod=$TRIPOD,format=nv12,hwupload,dewobble_opencl=$IN_CAMERA:out_h=$(( $HEIGHT / 2 - $BAND / 2)):$OUT_CAMERA:out_fy=$(( -$BAND / 2)):stab=none[bottom];"\
+"[hw1][middle]overlay_opencl=y=$(( $HEIGHT / 2 - $BAND / 2 ))[base1];"\
+"[base1][top]overlay_opencl[base2];"\
 "[base2][bottom]overlay_opencl=y=$(( $HEIGHT / 2 + $BAND / 2 ))[outhw];"\
 "[outhw]hwdownload,format=nv12[out]"
 		-map "[out]"
@@ -78,9 +85,9 @@ else
 fi
 
 if [ $GPU = "intelcomp" ]; then
-	"$FFMPEG" "${INPUT_FLAGS[@]}" -i "$INPUT" -vf "vidstabdetect" -f null -
+	echo #$FFMPEG" "${INPUT_FLAGS[@]}" -i "$INPUT" -vf "vidstabdetect=tripod=$TRIPOD" -f null -
 fi
 
 # gdb --args \
-"$FFMPEG" "${INPUT_FLAGS[@]}" -i "$INPUT" "${OUTPUT_FLAGS[@]}" -y "${FLAGS[@]}" "$OUTPUT"
+"$FFMPEG" "${INPUT_FLAGS[@]}" -i "$INPUT" "${OUTPUT_FLAGS[@]}" -y "${FLAGS[@]}"
 
