@@ -34,11 +34,18 @@ elif [ $GPU = "intelcomp" ]; then
 		-init_hw_device opencl=nvidia_opencl:1.0 -filter_hw_device nvidia_opencl
 	)
 	IN_CAMERA="in_p=fish:in_fl=1623"
-	OUT_CAMERA="out_p=rect:out_fl=1100"
+	OUT_P=fish
+	OUT_FL=1623
+	WIDTH=2704
 	HEIGHT=1520
-	BAND=160
 	FIXED=false
-	SMOOTHING=90
+	FRAME_RATE=60
+	SMOOTH_MULTIPLIER=3
+
+	# Calculated
+	OUT_SIZE="out_w=$(( $WIDTH / 2 )):out_h=$(( $HEIGHT / 2 ))"
+	OUT_CAMERA="out_p=$OUT_P:out_fl=$(( $OUT_FL )):out_fx=$(( $WIDTH / 4 )):out_fy=$(( $HEIGHT / 4 )):border=replicate"
+	SMOOTHING=$(( $FRAME_RATE * $SMOOTH_MULTIPLIER / 2 ))
 	if $FIXED; then
 		STAB=fixed
 		TRIPOD=1
@@ -48,13 +55,15 @@ elif [ $GPU = "intelcomp" ]; then
 	fi
 	OUTPUT_FLAGS=(
 		-filter_complex
-"[0:v]hwupload,split=outputs=3[hw1][hw2][hw3];"\
-"[hw2]dewobble_opencl=$IN_CAMERA:$OUT_CAMERA:out_h=$BAND:stab=none[middle];"\
-"[hw3]dewobble_opencl=$IN_CAMERA:out_h=$(($HEIGHT / 2 - $BAND / 2)):$OUT_CAMERA:out_fy=$(( $HEIGHT / 2 )):stab=$STAB:stab_r=$SMOOTHING[top];"\
-"[0:v]vidstabtransform=smoothing=$SMOOTHING:optzoom=0:crop=black:tripod=$TRIPOD,format=nv12,hwupload,dewobble_opencl=$IN_CAMERA:out_h=$(( $HEIGHT / 2 - $BAND / 2)):$OUT_CAMERA:out_fy=$(( -$BAND / 2)):stab=none[bottom];"\
-"[hw1][middle]overlay_opencl=y=$(( $HEIGHT / 2 - $BAND / 2 ))[base1];"\
-"[base1][top]overlay_opencl[base2];"\
-"[base2][bottom]overlay_opencl=y=$(( $HEIGHT / 2 + $BAND / 2 ))[outhw];"\
+"[0:v]scale=w=$(( $WIDTH / 2)):h=$(( $HEIGHT / 2 )),format=nv12,split[scaled1][scaled2];"\
+"[scaled1]hwupload,split=outputs=3[hw1][hw2][hw3];"\
+"[hw1]dewobble_opencl=$IN_CAMERA:$OUT_CAMERA:out_w=$WIDTH:out_h=$HEIGHT:stab=none[base];"\
+"[hw2]dewobble_opencl=$IN_CAMERA:$OUT_CAMERA:$OUT_SIZE:stab=$STAB:stab_r=$SMOOTHING[topright];"\
+"[scaled2]vidstabtransform=smoothing=$SMOOTHING:optzoom=0:crop=black:tripod=$TRIPOD,format=nv12,hwupload,dewobble_opencl=$IN_CAMERA:$OUT_CAMERA:$OUT_SIZE:stab=none[bottomleft];"\
+"[hw3]deshake_opencl=tripod=$TRIPOD:adaptive_crop=0:smooth_window_multiplier=$SMOOTH_MULTIPLIER,dewobble_opencl=$IN_CAMERA:$OUT_CAMERA:$OUT_SIZE:stab=none[bottomright];"\
+"[base][topright]overlay_opencl=x=$(( $WIDTH / 2 ))[base2];"\
+"[base2][bottomleft]overlay_opencl=y=$(( $HEIGHT / 2 ))[base3];"\
+"[base3][bottomright]overlay_opencl=x=$(( $WIDTH / 2 )):y=$(( $HEIGHT / 2 ))[outhw];"\
 "[outhw]hwdownload,format=nv12[out]"
 		-map "[out]"
 		-map "0:a"
@@ -82,10 +91,11 @@ elif [ $GPU = "amd" ]; then
 	)
 else
 	echo Unsupported GPU: $GPU
+	exit 1
 fi
 
 if [ $GPU = "intelcomp" ]; then
-	echo #$FFMPEG" "${INPUT_FLAGS[@]}" -i "$INPUT" -vf "vidstabdetect=tripod=$TRIPOD" -f null -
+	"$FFMPEG" "${INPUT_FLAGS[@]}" -i "$INPUT" -vf "vidstabdetect=tripod=$TRIPOD" -f null -
 fi
 
 # gdb --args \
