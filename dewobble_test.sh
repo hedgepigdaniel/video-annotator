@@ -2,30 +2,21 @@
 
 set -x -e
 
-if [ $# -lt 3 ]; then
-	echo "Usage: $0 <opencl filter> <intel|amd|nvidia> <input> <output>"
+if [ $# -lt 4 ]; then
+	>&2 echo "Usage: $0 transcode|decode <intel|amd|nvidia> <opencl filter> <input> [...flags] [output]"
 	exit 1
 fi
 
-FILTER=$1
+ACTION=$1
 GPU=$2
-INPUT=$3
-FLAGS=("${@:4}")
+FILTER=$3
+INPUT=$4
+FLAGS=("${@:5}")
 
 FFMPEG=./ffmpeg
 
 
-if [ $GPU = "intel" ]; then
-	INPUT_FLAGS=(
-		-init_hw_device vaapi=intel_vaapi:,driver=iHD,kernel_driver=i915
-		-hwaccel vaapi -hwaccel_device intel_vaapi -hwaccel_output_format vaapi
-		-init_hw_device opencl=intel_opencl@intel_vaapi -filter_hw_device intel_opencl
-	)
-	OUTPUT_FLAGS=(
-		-vf "hwmap,$FILTER,hwmap=derive_device=vaapi:reverse=1"
-		-c:v h264_vaapi
-	)
-elif [ $GPU = "intelcomp" ]; then
+if [ $GPU = "comp" ]; then
 	INPUT_FLAGS=(
 		-init_hw_device vaapi=intel_vaapi:,driver=iHD,kernel_driver=i915
 		#-hwaccel vaapi -hwaccel_device intel_vaapi
@@ -33,18 +24,18 @@ elif [ $GPU = "intelcomp" ]; then
 		#-init_hw_device opencl=intel_opencl@intel_vaapi -filter_hw_device intel_opencl
 		-init_hw_device opencl=nvidia_opencl:1.0 -filter_hw_device nvidia_opencl
 	)
-	IN_CAMERA="in_p=fish:in_fl=1623"
+	IN_CAMERA="in_p=fish:in_fl=942"
 	OUT_P=fish
-	OUT_FL=1623
-	WIDTH=2704
-	HEIGHT=1520
+	OUT_FL=942
+	WIDTH=1920
+	HEIGHT=1440
 	FIXED=false
 	FRAME_RATE=60
-	SMOOTH_MULTIPLIER=3
+	SMOOTH_MULTIPLIER=2
 
 	# Calculated
 	OUT_SIZE="out_w=$(( $WIDTH / 2 )):out_h=$(( $HEIGHT / 2 ))"
-	OUT_CAMERA="out_p=$OUT_P:out_fl=$(( $OUT_FL )):out_fx=$(( $WIDTH / 4 )):out_fy=$(( $HEIGHT / 4 )):border=replicate"
+	OUT_CAMERA="out_p=$OUT_P:out_fl=$(( $OUT_FL )):out_fx=$(( $WIDTH / 4 )):out_fy=$(( $HEIGHT / 4 ))"
 	SMOOTHING=$(( $FRAME_RATE * $SMOOTH_MULTIPLIER / 2 ))
 	if $FIXED; then
 		STAB=fixed
@@ -69,13 +60,25 @@ elif [ $GPU = "intelcomp" ]; then
 		-map "0:a"
 		-c:v h264_nvenc -qp 19
 	)
+elif [ $GPU = "intel" ]; then
+	INPUT_FLAGS=(
+		-init_hw_device vaapi=intel_vaapi:,driver=iHD,kernel_driver=i915
+		-hwaccel vaapi -hwaccel_device intel_vaapi -hwaccel_output_format vaapi
+		-init_hw_device opencl=intel_opencl@intel_vaapi -filter_hw_device intel_opencl
+	)
+	PREFILTER="hwmap,"
+	POSTFILTER=",hwmap=derive_device=vaapi:reverse=1"
+	OUTPUT_FLAGS=(
+		-c:v h264_vaapi
+	)
 elif [ $GPU = "nvidia" ]; then
 	INPUT_FLAGS=(
 		-init_hw_device opencl=nvidia_opencl:1.0 -filter_hw_device nvidia_opencl
 		-hwaccel nvdec
 	)
+	PREFILTER="hwupload,"
+	POSTFILTER=",hwdownload,format=nv12"
 	OUTPUT_FLAGS=(
-		-vf "hwupload,$FILTER,hwdownload,format=nv12"
 		-c:v h264_nvenc -qp 19
 	)
 elif [ $GPU = "amd" ]; then
@@ -85,19 +88,31 @@ elif [ $GPU = "amd" ]; then
 		-init_hw_device vaapi=amd_vaapi:,driver=radeonsi,kernel_driver=amdgpu
 		-hwaccel vaapi -hwaccel_device amd_vaapi
 	)
+	PREFILTER="hwupload,"
+	POSTFILTER=",hwdownload,format=nv12"
 	OUTPUT_FLAGS=(
-		-vf "hwupload,$FILTER,hwdownload,format=nv12"
 		-c:v h264_amf -qp_i 21 -qp_b 21 -qp_p 21 -quality quality
 	)
 else
-	echo Unsupported GPU: $GPU
+	>&2 echo Unsupported GPU: $GPU
 	exit 1
 fi
 
-if [ $GPU = "intelcomp" ]; then
-	"$FFMPEG" "${INPUT_FLAGS[@]}" -i "$INPUT" -vf "vidstabdetect=tripod=$TRIPOD" -f null -
+if [ $GPU = "comp" ]; then
+	"$FFMPEG" "${INPUT_FLAGS[@]}" -hwaccel vaapi -i "$INPUT" -vf "scale=w=$(( $WIDTH / 2)):h=$(( $HEIGHT / 2 )),vidstabdetect=tripod=$TRIPOD" -f null -
+fi
+
+if [ "$ACTION" = "decode" ]; then
+	echo "$FFMPEG" "${INPUT_FLAGS[@]}" -i "$INPUT" \
+		-vf "$PREFILTER$FILTER" -f null - "${FLAGS[@]}"
+elif [ "$ACTION" = "transcode" ]; then
+	echo "$FFMPEG" "${INPUT_FLAGS[@]}" -i "$INPUT" \
+		-vf "$PREFILTER$FILTER$POSTFILTER" "${OUTPUT_FLAGS[@]}" "${FLAGS[@]}"
 fi
 
 # gdb --args \
-"$FFMPEG" "${INPUT_FLAGS[@]}" -i "$INPUT" "${OUTPUT_FLAGS[@]}" -y "${FLAGS[@]}"
+# perf record --call-graph dwarf \
+# perf timechart record -g \
+# valgrind --tool=callgrind --separate-threads=yes \
+# LD_PRELOAD=/usr/lib/libprofiler.so CPUPROFILE=test.prof CPUPROFILE_REALTIME=1 \
 
