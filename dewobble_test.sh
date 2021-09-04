@@ -24,18 +24,18 @@ if [ $GPU = "comp" ]; then
 		#-init_hw_device opencl=intel_opencl@intel_vaapi -filter_hw_device intel_opencl
 		-init_hw_device opencl=nvidia_opencl:1.0 -filter_hw_device nvidia_opencl
 	)
-	IN_CAMERA="in_p=fish:in_fl=942"
+	IN_CAMERA="in_p=fish:in_dfov=109.5"
 	OUT_P=fish
-	OUT_FL=942
-	WIDTH=1920
-	HEIGHT=1440
+	OUT_DFOV=109.5
+	WIDTH=2704
+	HEIGHT=1520
 	FIXED=false
 	FRAME_RATE=60
-	SMOOTH_MULTIPLIER=2
+	SMOOTH_MULTIPLIER=3
 
 	# Calculated
 	OUT_SIZE="out_w=$(( $WIDTH / 2 )):out_h=$(( $HEIGHT / 2 ))"
-	OUT_CAMERA="out_p=$OUT_P:out_fl=$(( $OUT_FL )):out_fx=$(( $WIDTH / 4 )):out_fy=$(( $HEIGHT / 4 ))"
+	OUT_CAMERA="out_p=$OUT_P:out_dfov=$OUT_DFOV:out_fx=$(( $WIDTH / 4 )):out_fy=$(( $HEIGHT / 4 ))"
 	SMOOTHING=$(( $FRAME_RATE * $SMOOTH_MULTIPLIER / 2 ))
 	if $FIXED; then
 		STAB=fixed
@@ -48,10 +48,10 @@ if [ $GPU = "comp" ]; then
 		-filter_complex
 "[0:v]scale=w=$(( $WIDTH / 2)):h=$(( $HEIGHT / 2 )),format=nv12,split[scaled1][scaled2];"\
 "[scaled1]hwupload,split=outputs=3[hw1][hw2][hw3];"\
-"[hw1]dewobble_opencl=$IN_CAMERA:$OUT_CAMERA:out_w=$WIDTH:out_h=$HEIGHT:stab=none[base];"\
-"[hw2]dewobble_opencl=$IN_CAMERA:$OUT_CAMERA:$OUT_SIZE:stab=$STAB:stab_r=$SMOOTHING[topright];"\
-"[scaled2]vidstabtransform=smoothing=$SMOOTHING:optzoom=0:crop=black:tripod=$TRIPOD,format=nv12,hwupload,dewobble_opencl=$IN_CAMERA:$OUT_CAMERA:$OUT_SIZE:stab=none[bottomleft];"\
-"[hw3]deshake_opencl=tripod=$TRIPOD:adaptive_crop=0:smooth_window_multiplier=$SMOOTH_MULTIPLIER,dewobble_opencl=$IN_CAMERA:$OUT_CAMERA:$OUT_SIZE:stab=none[bottomright];"\
+"[hw1]libdewobble=$IN_CAMERA:$OUT_CAMERA:out_w=$WIDTH:out_h=$HEIGHT:stab=none[base];"\
+"[hw2]libdewobble=$IN_CAMERA:$OUT_CAMERA:$OUT_SIZE:stab=$STAB:stab_r=$SMOOTHING[topright];"\
+"[scaled2]vidstabtransform=smoothing=$SMOOTHING:optzoom=0:crop=black:tripod=$TRIPOD,format=nv12,hwupload,libdewobble=$IN_CAMERA:$OUT_CAMERA:$OUT_SIZE:stab=none[bottomleft];"\
+"[hw3]deshake_opencl=tripod=$TRIPOD:adaptive_crop=0:smooth_window_multiplier=$SMOOTH_MULTIPLIER,libdewobble=$IN_CAMERA:$OUT_CAMERA:$OUT_SIZE:stab=none[bottomright];"\
 "[base][topright]overlay_opencl=x=$(( $WIDTH / 2 ))[base2];"\
 "[base2][bottomleft]overlay_opencl=y=$(( $HEIGHT / 2 ))[base3];"\
 "[base3][bottomright]overlay_opencl=x=$(( $WIDTH / 2 )):y=$(( $HEIGHT / 2 ))[outhw];"\
@@ -70,6 +70,16 @@ elif [ $GPU = "intel" ]; then
 	POSTFILTER=",hwmap=derive_device=vaapi:reverse=1"
 	OUTPUT_FLAGS=(
 		-c:v h264_vaapi
+	)
+elif [ $GPU = "pocl" ]; then
+	INPUT_FLAGS=(
+		-hwaccel vaapi
+		-init_hw_device opencl=pocl_opencl:3.0 -filter_hw_device pocl_opencl
+	)
+	PREFILTER="hwupload,"
+	POSTFILTER=",hwdownload,format=nv12"
+	OUTPUT_FLAGS=(
+		# -c:v h264_vaapi
 	)
 elif [ $GPU = "nvidia" ]; then
 	INPUT_FLAGS=(
@@ -99,7 +109,9 @@ else
 fi
 
 if [ $GPU = "comp" ]; then
-	"$FFMPEG" "${INPUT_FLAGS[@]}" -hwaccel vaapi -i "$INPUT" -vf "scale=w=$(( $WIDTH / 2)):h=$(( $HEIGHT / 2 )),vidstabdetect=tripod=$TRIPOD" -f null -
+	echo # "$FFMPEG" "${INPUT_FLAGS[@]}" -hwaccel vaapi -i "$INPUT" -vf "scale=w=$(( $WIDTH / 2)):h=$(( $HEIGHT / 2 )),vidstabdetect=tripod=$TRIPOD" -f null -
+	echo $FFMPEG "${INPUT_FLAGS[@]}" -i "$FILTER" "${OUTPUT_FLAGS[@]}" "$INPUT" "${FLAGS[@]}"
+	exit 0
 fi
 
 if [ "$ACTION" = "decode" ]; then
