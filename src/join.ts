@@ -2,9 +2,9 @@ import Ffmpeg from 'fluent-ffmpeg';
 import { promises as fs } from 'fs';
 import { resolve, dirname } from 'path';
 
-import { getMetadata } from './utils';
+import { getMetadata, notEmpty, parseNumber } from './utils';
 
-const findSourceSegments = async (code) => {
+const findSourceSegments = async (code: string) => {
   const segments = [`GOPR${code}.MP4`];
   let initialStat;
   try {
@@ -31,14 +31,16 @@ const findSourceSegments = async (code) => {
   return segments;
 }
 
-const findNumFrames = async (sourceSegments) => {
+const findNumFrames = async (sourceSegments: string[]) => {
   const metadatas = await Promise.all(sourceSegments.map(getMetadata));
   return metadatas
     .map((metadata) => metadata.streams[0].nb_frames)
-    .reduce((sum, frames) => sum + frames, 0);
+    .reduce((sum: number, frames) => sum + parseNumber(frames || '0'), 0);
 };
 
-export const join = async (code, { output }) => {
+const isTruthy = (val: unknown): val is true | string => Boolean(val)
+
+export const join = async (code: string, { output }: { output: string }) => {
   const outputFile = output || `${code}.mp4`;
   const sourceSegments = await findSourceSegments(code);
   console.log('Found source segments:\n', sourceSegments);
@@ -68,7 +70,7 @@ export const join = async (code, { output }) => {
         '-map 0:v',
         '-map 0:a',
         gpmdStreamIndex !== -1 && `-map 0:${gpmdStreamIndex}`,
-      ].filter(Boolean))
+      ].filter(notEmpty))
       .run();
   });
 };

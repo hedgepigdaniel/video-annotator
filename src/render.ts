@@ -1,7 +1,7 @@
-import Ffmpeg from 'fluent-ffmpeg';
+import Ffmpeg, { AudioVideoFilter, FfmpegCommand } from 'fluent-ffmpeg';
 import Queue from 'promise-queue';
 
-import { getMetadata } from './utils';
+import { getMetadata, notEmpty } from './utils';
 
 
 // Holy grail: ffmpeg -hwaccel vaapi -hwaccel_output_format vaapi -init_hw_device vaapi=intel:/dev/dri/renderD128 -init_hw_device opencl=ocl@intel -hwaccel_device intel -filter_hw_device ocl -i 1390.mkv -vf 'hwmap=derive_device=opencl,boxblur_opencl,hwmap=derive_device=vaapi:reverse=1' -c:v h264_vaapi ocl.mkv -y -v verbose
@@ -19,21 +19,24 @@ const VAAPI_QP = 19;
 const analyseQueue = new Queue(2);
 const encodeQueue = new Queue(4);
 
-const analyse = (sourceFileName, destFileName, {
+type AnalyseOptions = {
+  start?: string,
+  duration?: string,
+  end?: string
+  upsample?: number,
+  vaapiDevice?: string,
+};
+
+const analyse = (sourceFileName: string, destFileName: string, {
   start,
   duration,
   end,
   upsample,
-  width,
-  height,
   vaapiDevice,
-}) =>
+}: AnalyseOptions) =>
   analyseQueue.add(
     () => new Promise(async (resolve, reject) => {
       const metadata = await getMetadata(sourceFileName);
-      const { width: inputWidth, height: inputHeight } = metadata.streams.find(
-        (stream) => stream.codec_type === 'video',
-      );
       return Ffmpeg()
         .on('start', console.log)
         .on('codecData', console.log)
@@ -49,18 +52,19 @@ const analyse = (sourceFileName, destFileName, {
           start  && `-ss ${start}`,
           duration && `-t ${duration}`,
           end && `-to ${end}`,
-        ].filter(Boolean))
+        ].filter(notEmpty))
         .videoFilters([
           upsample && {
             filter: vaapiDevice ? 'scale_vaapi' : 'scale',
             options: {
-              w: `iw*${upsample / 100}`,
-              h: `ih*${upsample / 100}`,
+              w: `iw*${(upsample || 100) / 100}`,
+              h: `ih*${(upsample || 100) / 100}`,
             },
           },
-          vaapiDevice && {
+          vaapiDevice ? {
             filter: 'hwdownload',
-          },
+            options: {},
+          } : undefined,
           {
             filter: 'format',
             options: {
@@ -76,14 +80,34 @@ const analyse = (sourceFileName, destFileName, {
               stepsize: 12,
             },
           },
-        ].filter(Boolean))
+        ].filter(notEmpty))
         .format('null')
         .output('-')
         .run();
       })
   );
 
-const encode = async (sourceFileName, destFileName, {
+type EncodeOptions = {
+  start?: string,
+  duration?: string,
+  end?: string
+  roll?: number,
+  pitch?: number,
+  yaw?: number,
+  width?: number,
+  height?: number,
+  upsample?: number,
+  stabilise?: boolean,
+  stabiliseBuffer: number,
+  projection?: string,
+  zoom?: number,
+  crop?: string,
+  resolution?: string,
+  vaapiDevice?: string,
+  encoder: string,
+}
+
+const encode = async (sourceFileName: string, destFileName: string, {
   start,
   duration,
   end,
@@ -101,13 +125,20 @@ const encode = async (sourceFileName, destFileName, {
   resolution,
   vaapiDevice,
   encoder,
-}) =>
+}: EncodeOptions) =>
   encodeQueue.add(() => new Promise(async (resolve, reject) => {
     const metadata = await getMetadata(sourceFileName);
-    const { width: inputWidth, height: inputHeight } = metadata.streams.find(
+    const videoStream = metadata.streams.find(
       (stream) => stream.codec_type === 'video',
     );
-    const useV360 = (
+    if (!videoStream) {
+      throw new Error("Failed to find a video stream");
+    }
+    const { width: inputWidth, height: inputHeight } = videoStream;
+    if (inputWidth === undefined || inputHeight === undefined) {
+      throw new Error("Failed to find video dimensions");
+    }
+    const useV360 = Boolean(
       projection && (
         projection !== 'sg' ||
         roll || pitch || yaw
@@ -115,7 +146,7 @@ const encode = async (sourceFileName, destFileName, {
     );
     const isVaapiEncoder = encoder.indexOf('vaapi') != -1;
     const isAmfEncoder = encoder.indexOf('amf') != -1;
-    const download = vaapiDevice && (useV360 || stabilise);
+    const download = Boolean(vaapiDevice && (useV360 || stabilise));
     return Ffmpeg()
       .on('start', console.log)
       .on('codecData', console.log)
@@ -131,7 +162,7 @@ const encode = async (sourceFileName, destFileName, {
         start && `-ss ${start}`,
         duration && `-t ${duration}`,
         end && `-to ${end}`,
-      ].filter(Boolean))
+      ].filter(notEmpty))
       .videoFilters([
         upsample && {
           filter: vaapiDevice ? 'scale_vaapi' : 'scale',
@@ -143,6 +174,7 @@ const encode = async (sourceFileName, destFileName, {
         },
         download && {
           filter: 'hwdownload',
+          options: {},
         },
         download && {
           filter: 'format',
@@ -177,7 +209,7 @@ const encode = async (sourceFileName, destFileName, {
             w: width || inputWidth * (upsample || 100) / 100,
             h: height || inputHeight * (upsample || 100) / 100,
 
-            pitch: ((pitch || 0) - (stabiliseFisheye ? 0 : 90) + 180) % 360 - 180,
+            pitch: ((pitch || 0) - 90 + 180) % 360 - 180,
             yaw: ((yaw || 0) + 180) % 360 - 180,
             roll : ((roll || 0) + 180) % 360 - 180,
 
@@ -192,9 +224,13 @@ const encode = async (sourceFileName, destFileName, {
         },
         (!vaapiDevice || download) && isVaapiEncoder && {
           filter: 'hwupload',
+          options: {},
         },
-        crop && `crop=${crop}`,
-        (resolution || crop) && {
+        crop ? {
+          filter: `crop=${crop}`,
+          options: {},
+        } : undefined,
+        (resolution || crop) ? {
           filter: (isVaapiEncoder || (isAmfEncoder && vaapiDevice && !download))
             ? 'scale_vaapi'
             : 'scale',
@@ -202,9 +238,12 @@ const encode = async (sourceFileName, destFileName, {
             w: `iw*${resolution}/ih`,
             h: `${resolution}`,
           } : {},
-        },
-        isAmfEncoder && vaapiDevice && download && 'hwmap',
-      ].filter(Boolean))
+        }: undefined,
+        (isAmfEncoder && vaapiDevice && download) ? {
+          filter: 'hwmap',
+          options: {},
+        } : undefined,
+      ].filter(notEmpty))
       .output(destFileName)
       .outputOptions([
         `-c:v ${encoder}`,
@@ -213,8 +252,12 @@ const encode = async (sourceFileName, destFileName, {
       .run();
     }));
 
+type RenderOptions = AnalyseOptions & EncodeOptions & {
+  encodeOnly?: boolean,
+  analyseOnly?: boolean,
+}
 
-export const render = async (sourceFileName, destFileName, options) => {
+export const render = async (sourceFileName: string, destFileName: string, options: RenderOptions) => {
   const { encodeOnly, analyseOnly, stabilise } = options;
   if (!encodeOnly && stabilise) {
     await analyse(sourceFileName, destFileName, options)

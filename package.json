@@ -7,20 +7,24 @@
   "author": "Daniel Playfair Cal <daniel.playfair.cal@gmail.com>",
   "license": "MIT",
   "scripts": {
-    "start": "babel-node src/cli.js",
-    "watch": "babel -d dist --source-maps both --watch src"
+    "start": "babel-node -x .ts src/cli.ts",
+    "watch": "babel -x .ts -d dist --source-maps both --watch src"
   },
   "dependencies": {
     "@babel/cli": "^7.15.4",
     "@babel/core": "^7.15.5",
     "@babel/node": "^7.15.4",
     "@babel/preset-env": "^7.15.4",
+    "@babel/preset-typescript": "^7.15.0",
+    "@types/fluent-ffmpeg": "^2.1.18",
+    "@types/promise-queue": "^2.2.0",
     "commander": "^8.1.0",
     "core-js": "^3.17.2",
     "fluent-ffmpeg": "^2.1.2",
     "glob": "^7.1.7",
     "promise-queue": "^2.2.5",
     "regenerator-runtime": "^0.13.9",
-    "source-map-support": "^0.5.19"
+    "source-map-support": "^0.5.19",
+    "typescript": "^4.4.2"
   }
 }

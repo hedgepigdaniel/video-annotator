@@ -4,29 +4,30 @@ import 'source-map-support/register';
 import "core-js/stable";
 import "regenerator-runtime/runtime";
 
-import commander from 'commander';
+import { Command } from 'commander';
 
 import { join } from './join';
 import { render } from './render';
+import { parseNumber } from './utils';
 
-const wrapError = (action) => async () => {
+const wrapError = (action: (...args: any[]) => Promise<unknown>) => async () => {
   try {
-    await action(...commander.args);
+    await action(...program.args);
   } catch (e) {
     console.error(e);
     process.exit(1);
   }
 };
 
-const parseNumber = (input) => parseInt(input, 10);
+const program = new Command();
 
-commander
+program
   .command('join <code>')
   .description('Join the segments of a video together into a single file')
   .option('-o, --output <output>', 'Path of resulting video')
   .action(wrapError(join));
 
-commander
+program
   .command('render <source> <dest>')
   .description('Extract part of a source video and write it to a file')
   .option('-s, --start <time>', 'The starting point in the source')
@@ -71,4 +72,4 @@ commander
   .option('--encoder <encoder>', 'The encoder used for the output video', 'libx264')
   .action(wrapError(render));
 
-commander.parse(process.argv);
+program.parse(process.argv);
