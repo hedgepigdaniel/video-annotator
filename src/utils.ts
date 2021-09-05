@@ -21,3 +21,5 @@ export const parseNumber = (input: string) => {
 export const notEmpty = <Value>(
   value: Value | null | undefined | false | 0
 ): value is Value => Boolean(value);
+
+export const identity = <Value>(value: Value): Value => value;
