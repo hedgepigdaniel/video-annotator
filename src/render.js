@@ -23,8 +23,6 @@ const analyse = (sourceFileName, destFileName, {
   start,
   duration,
   end,
-  lensCorrect,
-  stabiliseFisheye,
   upsample,
   width,
   height,
@@ -69,37 +67,6 @@ const analyse = (sourceFileName, destFileName, {
               pix_fmts: 'nv12',
             },
           },
-          lensCorrect && {
-            filter: 'lenscorrection',
-            options: {
-              k1: -0.03012,
-            },
-          },
-          stabiliseFisheye && {
-            filter: 'v360',
-            options: {
-              // Input: GoPro HERO5 Black
-              input: 'sg',
-              // v360 has incorrect calculation of horizontal/vertical FOV from vertical FOV
-              ih_fov: 122.6,
-              iv_fov: 94.4,
-
-              // Output
-              output: 'fisheye',
-              d_fov: 149.2,
-              // Diagonal FOV preserves the entire input in stereographic => rectilinear
-              w: width || inputWidth * (upsample || 100) / 100,
-              h: height || inputHeight * (upsample || 100) / 100,
-              pitch: -90,
-
-            },
-          },
-          stabiliseFisheye && {
-            filter: 'format',
-            options: {
-              pix_fmts: 'nv12',
-            },
-          },
           {
             filter: 'vidstabdetect',
             options: {
@@ -127,9 +94,7 @@ const encode = async (sourceFileName, destFileName, {
   height,
   upsample,
   stabilise,
-  stabiliseFisheye,
   stabiliseBuffer,
-  lensCorrect,
   projection,
   zoom,
   crop,
@@ -144,13 +109,13 @@ const encode = async (sourceFileName, destFileName, {
     );
     const useV360 = (
       projection && (
-        projection !== (stabiliseFisheye ? 'fisheye' : 'sg') ||
+        projection !== 'sg' ||
         roll || pitch || yaw
       )
     );
     const isVaapiEncoder = encoder.indexOf('vaapi') != -1;
     const isAmfEncoder = encoder.indexOf('amf') != -1;
-    const download = vaapiDevice && (useV360 || lensCorrect || stabilise);
+    const download = vaapiDevice && (useV360 || stabilise);
     return Ffmpeg()
       .on('start', console.log)
       .on('codecData', console.log)
@@ -185,32 +150,6 @@ const encode = async (sourceFileName, destFileName, {
             pix_fmts: 'nv12',
           },
         },
-        lensCorrect && {
-          filter: 'lenscorrection',
-          options: {
-            k1: -0.03012,
-          },
-        },
-        stabiliseFisheye && {
-          filter: 'v360',
-          options: {
-            // Input: GoPro HERO5 Black
-            input: 'sg',
-            // v360 has incorrect calculation of horizontal/vertical FOV from vertical FOV
-            ih_fov: 122.6,
-            iv_fov: 94.4,
-
-            // Output
-            output: 'fisheye',
-            d_fov: 149.2,
-            // Diagonal FOV preserves the entire input in stereographic => rectilinear
-            w: width || inputWidth,
-            h: height || inputHeight,
-            pitch: -90,
-
-            interp: upsample ? 'linear' : 'lanc',
-          },
-        },
         stabilise && {
           filter: 'vidstabtransform',
           options: {
@@ -225,18 +164,11 @@ const encode = async (sourceFileName, destFileName, {
         useV360 && {
           filter: 'v360',
           options: {
-            ...(stabiliseFisheye ? {
-              // Input: corrected fisheye projection
-              input: 'fisheye',
-              // This makes sense because the fisheye projection is linear
-              id_fov: 149.2 * (1 + (stabiliseBuffer || 0) / 100),
-            } : {
-              // Input: GoPro HERO5 Black
-              input: 'sg',
-              // v360 has incorrect calculation of horizontal/vertical FOV from vertical FOV
-              ih_fov: 122.6,
-              iv_fov: 94.4,
-            }),
+            // Input: GoPro HERO5 Black
+            input: 'sg',
+            // v360 has incorrect calculation of horizontal/vertical FOV from vertical FOV
+            ih_fov: 122.6,
+            iv_fov: 94.4,
 
             // Output
             output: projection,
