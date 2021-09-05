@@ -1,0 +1,13 @@
+# Ignore everything
+*
+!*/
+
+opencv/
+dist/
+package.json
+
+# Except
+!*.ts
+!*.js
+!*.json
+!*.md

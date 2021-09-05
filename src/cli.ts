@@ -1,75 +1,91 @@
 #!/usr/bin/env node
 
-import 'source-map-support/register';
+import "source-map-support/register";
 import "core-js/stable";
 import "regenerator-runtime/runtime";
 
-import { Command } from 'commander';
+import { Command } from "commander";
 
-import { join } from './join';
-import { render } from './render';
-import { parseNumber } from './utils';
+import { join } from "./join";
+import { render } from "./render";
+import { parseNumber } from "./utils";
 
-const wrapError = (action: (...args: any[]) => Promise<unknown>) => async () => {
-  try {
-    await action(...program.args);
-  } catch (e) {
-    console.error(e);
-    process.exit(1);
-  }
-};
+const wrapError =
+  (action: (...args: any[]) => Promise<unknown>) => async () => {
+    try {
+      await action(...program.args);
+    } catch (e) {
+      console.error(e);
+      process.exit(1);
+    }
+  };
 
 const program = new Command();
 
 program
-  .command('join <code>')
-  .description('Join the segments of a video together into a single file')
-  .option('-o, --output <output>', 'Path of resulting video')
+  .command("join <code>")
+  .description("Join the segments of a video together into a single file")
+  .option("-o, --output <output>", "Path of resulting video")
   .action(wrapError(join));
 
 program
-  .command('render <source> <dest>')
-  .description('Extract part of a source video and write it to a file')
-  .option('-s, --start <time>', 'The starting point in the source')
-  .option('-d, --duration <time>', 'The duration of the output')
-  .option('-e, --end <time>', 'The end point in the source')
-  .option('-w, --width <pixels>', 'Output width (pixels)', parseNumber)
-  .option('-h, --height <pixels>', 'Output height (pixels)', parseNumber)
-  .option('-r, --roll <angle>', 'Turn camera clockwise by <degrees>', parseNumber)
-  .option('-p, --pitch <degrees>', 'Turn camera up by <degrees>', parseNumber)
-  .option('-y, --yaw <degrees>', 'Turn camera left by <degrees>', parseNumber)
-  .option('-z, --zoom <percent>', 'Zoom camera by <percent>', parseNumber)
-  .option('-u, --upsample <percent>', 'Scale video before processing', parseNumber)
-  .option('--crop <crop>', 'Crop video (options for ffmpeg crop filter)')
-  .option('--stabilise', 'Apply stabilisation to remove camera shaking')
+  .command("render <source> <dest>")
+  .description("Extract part of a source video and write it to a file")
+  .option("-s, --start <time>", "The starting point in the source")
+  .option("-d, --duration <time>", "The duration of the output")
+  .option("-e, --end <time>", "The end point in the source")
+  .option("-w, --width <pixels>", "Output width (pixels)", parseNumber)
+  .option("-h, --height <pixels>", "Output height (pixels)", parseNumber)
   .option(
-    '--stabilise-fisheye',
-    'Convert to the equidistant fisheye projection before doing stabilisation (marginally reduces warping)',
+    "-r, --roll <angle>",
+    "Turn camera clockwise by <degrees>",
+    parseNumber
+  )
+  .option("-p, --pitch <degrees>", "Turn camera up by <degrees>", parseNumber)
+  .option("-y, --yaw <degrees>", "Turn camera left by <degrees>", parseNumber)
+  .option("-z, --zoom <percent>", "Zoom camera by <percent>", parseNumber)
+  .option(
+    "-u, --upsample <percent>",
+    "Scale video before processing",
+    parseNumber
+  )
+  .option("--crop <crop>", "Crop video (options for ffmpeg crop filter)")
+  .option("--stabilise", "Apply stabilisation to remove camera shaking")
+  .option(
+    "--stabilise-fisheye",
+    "Convert to the equidistant fisheye projection before doing stabilisation (marginally reduces warping)"
   )
   .option(
-    '--stabilise-buffer <percent>',
-    'Percentage to zoom out during stabilisation (so you can see where the camera shakes to)',
+    "--stabilise-buffer <percent>",
+    "Percentage to zoom out during stabilisation (so you can see where the camera shakes to)",
     parseNumber,
-    0,
+    0
   )
   .option(
-    '-l, --lens-correct',
-    'Correct lens distortion (from closest well known projection)',
+    "-l, --lens-correct",
+    "Correct lens distortion (from closest well known projection)"
   )
   .option(
-    '--projection <projection>',
-    'Use the specified lens projection (default rectilinear). See v360 filter docs for options.',
+    "--projection <projection>",
+    "Use the specified lens projection (default rectilinear). See v360 filter docs for options."
   )
   .option(
-    '-c, --encode-only',
-    'Skip analyze stage, use existing stabilisation data if applicable',
+    "-c, --encode-only",
+    "Skip analyze stage, use existing stabilisation data if applicable"
   )
   .option(
-    '-a, --analyse-only',
-    'Skip encode stage, generate stabilisation data only',
+    "-a, --analyse-only",
+    "Skip encode stage, generate stabilisation data only"
   )
-  .option('--vaapi-device <device>', 'VAAPI device render node (e.g. :/dev/dri/renderD128")')
-  .option('--encoder <encoder>', 'The encoder used for the output video', 'libx264')
+  .option(
+    "--vaapi-device <device>",
+    'VAAPI device render node (e.g. :/dev/dri/renderD128")'
+  )
+  .option(
+    "--encoder <encoder>",
+    "The encoder used for the output video",
+    "libx264"
+  )
   .action(wrapError(render));
 
 program.parse(process.argv);
