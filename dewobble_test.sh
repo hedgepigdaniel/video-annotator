@@ -24,11 +24,11 @@ if [ $GPU = "comp" ]; then
 		#-init_hw_device opencl=intel_opencl@intel_vaapi -filter_hw_device intel_opencl
 		-init_hw_device opencl=nvidia_opencl:1.0 -filter_hw_device nvidia_opencl
 	)
-	IN_CAMERA="in_p=fish:in_dfov=109.5"
+	IN_CAMERA="in_p=fish:in_dfov=145.8"
 	OUT_P=fish
-	OUT_DFOV=109.5
-	WIDTH=2704
-	HEIGHT=1520
+	OUT_DFOV=160
+	WIDTH=1920
+	HEIGHT=1440
 	FIXED=false
 	FRAME_RATE=60
 	SMOOTH_MULTIPLIER=3
