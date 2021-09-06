@@ -74,7 +74,22 @@ program
     identity,
     null
   )
-  .option("--stabilise", "Apply stabilisation to remove camera shaking", false)
+  .option(
+    "--filter <filter>",
+    "Choose the FFmpeg filter to use (vidstab, deshake, deshake_opencl, dewobble)",
+    "dewobble"
+  )
+  .option(
+    "--stabilise <type>",
+    "Apply stabilisation to remove camera shaking (none, fixed, smooth)",
+    "none"
+  )
+  .option(
+    "--stabilise-radius <number>",
+    "the number of frames to look ahead and behind for stabilisation",
+    parseNumber,
+    90
+  )
   .option(
     "--stabilise-buffer <percent>",
     "Percentage to zoom out during stabilisation (so you can see where the camera shakes to)",
@@ -82,10 +97,16 @@ program
     0
   )
   .option(
+    "--input-dfov <degrees>",
+    "Diagonal field of view of the input camera",
+    parseNumber,
+    145.8
+  )
+  .option(
     "--projection <projection>",
-    "Use the specified lens projection (default rectilinear). See v360 filter docs for options.",
+    "Use the specified lens projection. See v360 filter docs for options.",
     identity,
-    null
+    "rect"
   )
   .option(
     "-c, --encode-only",
@@ -125,6 +146,7 @@ program
     "The encoder used for the output video",
     "libx264"
   )
+  .option("--debug", "Include debugging information in the output", false)
   .action(wrapError(render));
 
 program.parse(process.argv);
