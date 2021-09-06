@@ -328,7 +328,8 @@ const combinePipelines = ({
   generatePadName: () => string;
 }): FilterPipeline => {
   const nonEmptyPipelines = pipelines.filter(
-    (pipeline) => pipeline.filters.length > 0
+    (pipeline) =>
+      pipeline.filters.length > 0 && pipeline.filters[0]?.filter !== "null"
   );
   if (nonEmptyPipelines.length === 0) {
     return {
@@ -696,64 +697,145 @@ const getDeshakePipeline = ({
   };
 };
 
+const getBlurEdgesPipeline = ({
+  inputPad,
+  outputPad,
+  stabiliseBuffer,
+  generatePadName,
+  inputWidth,
+  inputHeight,
+}: RenderOptions & {
+  inputPad: string;
+  outputPad: string;
+  inputWidth: number;
+  inputHeight: number;
+  generatePadName: () => string;
+}): FilterPipeline => {
+  const blur = stabiliseBuffer > 0;
+  const beforeBlur = generatePadName();
+  const blurMask = generatePadName();
+  const blackSource = generatePadName();
+  const blurRadius = 32;
+  return {
+    inputPad,
+    inputFormat: null,
+    filters: [
+      ...connectFilters(
+        [
+          blur && {
+            filter: "format",
+            options: {
+              pix_fmts: "rgba",
+            },
+          },
+        ].filter(notEmpty),
+        inputPad,
+        blur ? beforeBlur : outputPad,
+        generatePadName
+      ),
+      blur && {
+        inputs: [beforeBlur, blurMask],
+        filter: "overlay",
+        outputs: outputPad,
+      },
+      blur && {
+        inputs: [],
+        filter: "color",
+        options: {
+          color: "black",
+          size: `${inputWidth}x${inputHeight}`,
+          rate: 1,
+          duration: 1,
+        },
+        outputs: blackSource,
+      },
+      ...(blur
+        ? connectFilters(
+            [
+              {
+                filter: "format",
+                options: {
+                  pix_fmts: "rgba",
+                },
+              },
+              {
+                filter: "geq",
+                options: {
+                  r: `r(X,Y)`,
+                  a: `max(255-max(0,min(255,min(X*${255 / blurRadius},(W-X)*${
+                    255 / blurRadius
+                  }))),255-max(0,min(255,min(Y*${255 / blurRadius},(H-Y)*${
+                    255 / blurRadius
+                  }))))`,
+                },
+              },
+            ],
+            blackSource,
+            blurMask,
+            generatePadName
+          )
+        : []),
+    ].filter(notEmpty),
+    outputPad,
+    outputFormat: null,
+  };
+};
+
 const getDeshakeOpenClPipeline = ({
   stabilise,
   stabiliseRadius,
-  frameRate,
   debug,
   inputPad,
   outputPad,
+  frameRate,
   generatePadName,
 }: RenderOptions & {
-  frameRate: number;
-  debug: boolean;
   inputPad: string;
   outputPad: string;
+  frameRate: number;
   generatePadName: () => string;
-}): FilterPipeline => {
-  return {
+}): FilterPipeline => ({
+  inputPad,
+  inputFormat: debug ? null : "OPENCL",
+  filters: connectFilters(
+    [
+      debug && {
+        filter: "format",
+        options: {
+          pix_fmts: "bgr24", // Debug mode requires RGB
+        },
+      },
+      debug && {
+        filter: "hwupload",
+        options: {},
+      },
+      {
+        filter: "deshake_opencl",
+        options: {
+          tripod: stabilise === "fixed" ? 1 : 0,
+          adaptive_crop: 0,
+          smooth_window_multiplier: (stabiliseRadius * 2) / frameRate,
+          debug: debug ? 1 : 0,
+        },
+      },
+      debug && {
+        filter: "hwdownload",
+        options: {},
+      },
+      debug && {
+        filter: "format",
+        options: {
+          pix_fmts: "gbrp",
+        },
+      },
+    ].filter(notEmpty),
     inputPad,
-    inputFormat: debug ? null : "OPENCL",
-    filters: connectFilters(
-      [
-        debug && {
-          filter: "format",
-          options: {
-            pix_fmts: "rgba",
-          },
-        },
-        debug && {
-          filter: "hwupload",
-          options: {},
-        },
-        {
-          filter: "deshake_opencl",
-          options: {
-            tripod: stabilise === "fixed" ? 1 : 0,
-            adaptive_crop: 0,
-            smooth_window_multiplier: (stabiliseRadius * 2) / frameRate,
-            debug: 1,
-          },
-        },
-        debug && {
-          filter: "hwdownload",
-          options: {},
-        },
-        debug && {
-          filter: "format",
-          options: {
-            pix_fmts: "rgba",
-          },
-        },
-      ].filter(notEmpty),
-      inputPad,
-      outputPad,
-      generatePadName
-    ),
     outputPad,
-    outputFormat: debug ? null : "OPENCL",
-  };
-};
+    generatePadName
+  ),
+  outputPad,
+  outputFormat: debug ? null : "OPENCL",
+});
 
 const getRenderPipeline = (
   options: RenderOptions & {
@@ -807,6 +889,7 @@ const getRenderPipeline = (
     case "deshake_opencl": {
       return combinePipelines({
         pipelines: [
+          getBlurEdgesPipeline(options),
           getDewobbleBufferPipeline(options),
           getDeshakeOpenClPipeline(options),
           getDewobbleProjectionPipeline(options),
