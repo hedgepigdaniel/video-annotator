@@ -61,7 +61,6 @@ program
     parseNumber,
     0
   )
-  .option("-z, --zoom <percent>", "Zoom camera by <percent>", parseNumber, 0)
   .option(
     "-u, --upsample <percent>",
     "Scale video before processing",
@@ -92,15 +91,21 @@ program
   )
   .option(
     "--stabilise-buffer <percent>",
-    "Percentage to zoom out during stabilisation (so you can see where the camera shakes to)",
+    "Buffer space to add around input during stabilisation to avoid cropping",
     parseNumber,
-    0
+    20
   )
   .option(
     "--input-dfov <degrees>",
     "Diagonal field of view of the input camera",
     parseNumber,
     145.8
+  )
+  .option(
+    "--output-dfov <degrees>",
+    "Diagonal field of view of the input camera",
+    parseNumber,
+    null
   )
   .option(
     "--projection <projection>",
@@ -146,6 +151,7 @@ program
     "The encoder used for the output video",
     "libx264"
   )
+  .option("--compare", "Compare multiple filters", false)
   .option("--debug", "Include debugging information in the output", false)
   .action(wrapError(render));
 

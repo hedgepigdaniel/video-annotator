@@ -42,6 +42,14 @@ type VaapiVendor = "INTEL" | "AMD" | null;
 
 type HwAccel = "VAAPI" | "NVDEC" | null;
 
+type StabilisationFilter =
+  | "vidstab"
+  | "deshake"
+  | "deshake_opencl"
+  | "dewobble";
+
+type Projection = "flat" | "fisheye";
+
 type RenderOptions = {
   encodeOnly: boolean;
   analyseOnly: boolean;
@@ -54,13 +62,13 @@ type RenderOptions = {
   width: number | null;
   height: number | null;
   upsample: number;
-  filter: "vidstab" | "deshake" | "deshake_opencl" | "dewobble";
+  filter: StabilisationFilter;
   stabilise: "none" | "fixed" | "smooth";
   stabiliseRadius: number;
   stabiliseBuffer: number;
   inputDfov: number;
-  projection: "flat" | "fisheye";
-  zoom: number;
+  outputDfov: number | null;
+  projection: Projection;
   crop: string | null;
   hwAccel: HwAccel;
   vaapiVendor: VaapiVendor;
@@ -68,6 +76,7 @@ type RenderOptions = {
   mapOpenClFromVaapi: boolean;
   encoder: string;
   debug: boolean;
+  compare: boolean;
 };
 
 const makeGeneratePadName = () => {
@@ -280,6 +289,7 @@ const getAnalysePipeline = ({
   inputPad,
   outputPad,
   generatePadName,
+  compare,
 }: RenderOptions & {
   destFileName: string;
   inputPad: string;
@@ -291,7 +301,7 @@ const getAnalysePipeline = ({
     inputPad,
     filters: connectFilters(
       [
-        filter === "vidstab" &&
+        (filter === "vidstab" || compare) &&
           stabilise !== "none" && {
             filter: "vidstabdetect",
             options: {
@@ -441,7 +451,6 @@ const getV360Pipeline = ({
   roll,
   pitch,
   yaw,
-  zoom,
   inputPad,
   outputPad,
   generatePadName,
@@ -533,6 +542,7 @@ const getDewobbleProjectionPipeline = ({
   projection,
   stabiliseBuffer,
   inputDfov,
+  outputDfov,
   inputPad,
   outputPad,
   generatePadName,
@@ -557,7 +567,7 @@ const getDewobbleProjectionPipeline = ({
             in_p: "fish",
             in_dfov: inputDfov * (1 + stabiliseBuffer / 100),
             out_p: outputProjection,
-            out_dfov: inputDfov,
+            out_dfov: outputDfov || inputDfov,
             stab: "none",
           },
         },
@@ -577,12 +587,26 @@ const getDewobbleStabilisePipeline = ({
   inputDfov,
   stabiliseRadius,
   debug,
+  inputWidth,
+  inputHeight,
+  outputWidth,
+  outputHeight,
+  focalPointX,
+  focalPointY,
+  outputDfov,
   inputPad,
   outputPad,
   generatePadName,
 }: RenderOptions & {
   inputPad: string;
   outputPad: string;
+  outputWidth?: number;
+  outputHeight?: number;
+  focalPointX?: number;
+  focalPointY?: number;
+  outputDfov: number | null;
+  inputWidth: number;
+  inputHeight: number;
   generatePadName: () => string;
 }): FilterPipeline => {
   const outputProjection =
@@ -601,10 +625,14 @@ const getDewobbleStabilisePipeline = ({
             in_p: "fish",
             in_dfov: inputDfov,
             out_p: outputProjection,
-            out_dfov: inputDfov,
+            out_dfov: outputDfov || inputDfov,
             stab: stabilise === "smooth" ? "sg" : stabilise,
             stab_r: stabiliseRadius,
             debug: debug ? 1 : 0,
+            out_w: outputWidth || inputWidth,
+            out_h: outputHeight || inputHeight,
+            out_fx: focalPointX || (outputWidth || inputWidth) / 2,
+            out_fy: focalPointY || (outputHeight || inputHeight) / 2,
           },
         },
       ],
@@ -654,7 +682,6 @@ const getDewobbleBufferPipeline = ({
 };
 
 const getDeshakePipeline = ({
-  stabilise,
   stabiliseBuffer,
   inputWidth,
   inputHeight,
@@ -677,7 +704,7 @@ const getDeshakePipeline = ({
         {
           filter: "deshake",
           options: {
-            edge: "blank",
+            edge: stabiliseBuffer ? "mirror" : "blank",
             blocksize: 40,
             rx: 32,
             ry: 32,
@@ -841,6 +868,11 @@ const getRenderPipeline = (
   options: RenderOptions & {
     inputWidth: number;
     inputHeight: number;
+    outputWidth?: number;
+    outputHeight?: number;
+    focalPointX?: number;
+    focalPointY?: number;
+    outputDfov: number | null;
     frameRate: number;
     destFileName: string;
     filterDeviceFormat: HardwarePixelFormat;
@@ -908,6 +940,182 @@ const getRenderPipeline = (
       throw new Error(`Unknown filter ${filter}`);
     }
   }
+};
+
+export const multiplyDimensions = (
+  projection: Projection,
+  fov: number,
+  multiple: 2
+) => {
+  switch (projection) {
+    case "fisheye": {
+      return fov * multiple;
+    }
+    case "flat": {
+      return (
+        2 *
+        (180 / Math.PI) *
+        Math.atan(2 * Math.tan(((fov / 2) * Math.PI) / 180))
+      );
+    }
+    default: {
+      throw new Error(`unknown projection ${projection}`);
+    }
+  }
+};
+
+const getComparisonPipeline = (
+  options: RenderOptions & {
+    inputWidth: number;
+    inputHeight: number;
+    frameRate: number;
+    destFileName: string;
+    filterDeviceFormat: HardwarePixelFormat;
+    openclMappedFromVaapi: boolean;
+    inputPad: string;
+    outputPad: string;
+    generatePadName: () => string;
+  }
+): FilterPipeline => {
+  const {
+    inputPad,
+    outputPad,
+    inputWidth,
+    inputHeight,
+    generatePadName,
+    stabilise,
+    inputDfov,
+    outputDfov,
+    projection,
+  } = options;
+
+  if (stabilise === "none") {
+    throw new Error(`Comparison not possible without stabilisation`);
+  }
+
+  const scaledWidth = inputWidth / 2;
+  const scaledHeight = inputHeight / 2;
+
+  const scaledPad1 = generatePadName();
+  const scaledPad2 = generatePadName();
+
+  const hwPad1 = generatePadName();
+  const hwPad2 = generatePadName();
+  const hwPad3 = generatePadName();
+
+  const topLeftAndBasePad = generatePadName();
+  const topRightPad = generatePadName();
+  const bottomLeftPad = generatePadName();
+  const bottomRightPad = generatePadName();
+
+  const overlayPad2 = generatePadName();
+  const overlayPad3 = generatePadName();
+
+  const filters: StabilisationFilter[] = [
+    "dewobble",
+    "deshake",
+    "deshake_opencl",
+    "vidstab",
+  ];
+
+  return {
+    inputPad,
+    inputFormat: null,
+    filters: [
+      ...connectFilters(
+        [
+          {
+            filter: "scale",
+            options: { w: scaledWidth, h: scaledHeight },
+          },
+          {
+            filter: "format",
+            options: { pix_fmts: "nv12" },
+          },
+          {
+            filter: "split",
+            options: { outputs: 2 },
+          },
+        ],
+        inputPad,
+        [scaledPad1, scaledPad2],
+        generatePadName
+      ),
+      ...connectFilters(
+        [
+          {
+            filter: "hwupload",
+            options: {},
+          },
+          {
+            filter: "split",
+            options: { outputs: 3 },
+          },
+        ],
+        scaledPad1,
+        [hwPad1, hwPad2, hwPad3],
+        generatePadName
+      ),
+      ...getRenderPipeline({
+        ...options,
+        filter: "dewobble",
+        inputPad: hwPad1,
+        outputPad: topLeftAndBasePad,
+        inputWidth: scaledWidth,
+        inputHeight: scaledHeight,
+        outputWidth: inputWidth,
+        outputHeight: inputHeight,
+        focalPointX: scaledWidth / 2,
+        focalPointY: scaledHeight / 2,
+        outputDfov: multiplyDimensions(projection, outputDfov || inputDfov, 2),
+        stabilise: "none",
+      }).filters,
+      ...getRenderPipeline({
+        ...options,
+        filter: "dewobble",
+        inputPad: hwPad2,
+        outputPad: topRightPad,
+        inputWidth: scaledWidth,
+        inputHeight: scaledHeight,
+      }).filters,
+      ...getRenderPipeline({
+        ...options,
+        filter: "vidstab",
+        inputPad: scaledPad2,
+        outputPad: bottomLeftPad,
+        inputWidth: scaledWidth,
+        inputHeight: scaledHeight,
+      }).filters,
+      ...getRenderPipeline({
+        ...options,
+        filter: "deshake",
+        inputPad: hwPad3,
+        outputPad: bottomRightPad,
+        inputWidth: scaledWidth,
+        inputHeight: scaledHeight,
+      }).filters,
+      {
+        inputs: [topLeftAndBasePad, topRightPad],
+        filter: "overlay_opencl",
+        options: { x: scaledWidth },
+        outputs: [overlayPad2],
+      },
+      {
+        inputs: [overlayPad2, bottomLeftPad],
+        filter: "overlay_opencl",
+        options: { y: scaledHeight },
+        outputs: [overlayPad3],
+      },
+      {
+        inputs: [overlayPad3, bottomRightPad],
+        filter: "overlay_opencl",
+        options: { x: scaledWidth, y: scaledHeight },
+        outputs: [outputPad],
+      },
+    ],
+    outputPad,
+    outputFormat: "OPENCL",
+  };
 };
 
 const analyse = (
@@ -1007,7 +1215,10 @@ const encode = async (
           generatePadName,
         });
 
-        const stabilisePipeline = getRenderPipeline({
+        const pipelineCreator = options.compare
+          ? getComparisonPipeline
+          : getRenderPipeline;
+        const stabilisePipeline = pipelineCreator({
           ...options,
           inputPad: generatePadName(),
           outputPad: generatePadName(),
