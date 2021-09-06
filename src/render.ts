@@ -1,5 +1,8 @@
-import Ffmpeg, { AudioVideoFilter, Filter } from "fluent-ffmpeg";
+import Ffmpeg, { AudioVideoFilter, FilterSpecification } from "fluent-ffmpeg";
 import Queue from "promise-queue";
+import { connectFilters } from "./connectFilters";
+import { getConversionFilterSpecs } from "./pixelFormatConversion";
+import { HardwarePixelFormat } from "./pixelFormats";
 
 import { getMetadata, notEmpty, parseNumber } from "./utils";
 
@@ -18,20 +21,21 @@ const VAAPI_QP = 19;
 const analyseQueue = new Queue(2);
 const encodeQueue = new Queue(4);
 
-type HardwarePixelFormat = "VAAPI" | "OPENCL" | "AMF" | null;
-
 type FilterPipeline = {
+  inputPad: string;
   inputFormat: HardwarePixelFormat;
-  filters: AudioVideoFilter[];
+  filters: FilterSpecification[];
   outputFormat: HardwarePixelFormat;
+  outputPad: string;
 };
 
 type InputConfiguration = {
   inputOptions: string[];
-  filters: AudioVideoFilter[];
+  filters: FilterSpecification[];
   outputFormat: HardwarePixelFormat;
   filterDeviceFormat: HardwarePixelFormat;
   openclMappedFromVaapi: boolean;
+  outputPad: string;
 };
 
 type VaapiVendor = "INTEL" | "AMD" | null;
@@ -64,6 +68,14 @@ type RenderOptions = {
   mapOpenClFromVaapi: boolean;
   encoder: string;
   debug: boolean;
+};
+
+const makeGeneratePadName = () => {
+  let number: number = -1;
+  return () => {
+    number += 1;
+    return `p${number}`;
+  };
 };
 
 const getVaapiDeviceConfig = (
@@ -173,13 +185,15 @@ const getInputConfiguration = ({
   duration,
   end,
   upsample,
-}: RenderOptions): InputConfiguration => {
+  generatePadName,
+}: RenderOptions & { generatePadName: () => string }): InputConfiguration => {
   const hardwareOptions = getHardwareConfiguration({
     hwAccel,
     vaapiVendor,
     openClPlatform,
     mapOpenClFromVaapi,
   });
+  const outputPad = generatePadName();
   return {
     inputOptions: [
       ...hardwareOptions.options,
@@ -187,155 +201,114 @@ const getInputConfiguration = ({
       duration && `-t ${duration}`,
       end && `-to ${end}`,
     ].filter(notEmpty),
-    filters: [
-      upsample && {
-        filter: hwAccel == "VAAPI" ? "scale_vaapi" : "scale",
-        options: {
-          w: `iw*${(upsample || 100) / 100}`,
-          h: `ih*${(upsample || 100) / 100}`,
+    filters: connectFilters(
+      [
+        upsample && {
+          filter: hwAccel == "VAAPI" ? "scale_vaapi" : "scale",
+          options: {
+            w: `iw*${(upsample || 100) / 100}`,
+            h: `ih*${(upsample || 100) / 100}`,
+          },
         },
-      },
-    ].filter(notEmpty),
+      ].filter(notEmpty),
+      "0:v",
+      outputPad,
+      generatePadName
+    ),
     outputFormat: hardwareOptions.outputFormat,
     filterDeviceFormat: hardwareOptions.filterDeviceFormat,
     openclMappedFromVaapi: hardwareOptions.openclMappedFromVaapi,
+    outputPad,
   };
 };
 
 type OutputConfiguration = {
+  inputPad: string;
+  outputPad: string;
   inputFormat: HardwarePixelFormat;
-  filters: AudioVideoFilter[];
+  filters: FilterSpecification[];
   options: string[];
 };
 
 const getOutputConfiguration = ({
   encoder,
   crop,
-}: RenderOptions): OutputConfiguration => {
+  generatePadName,
+}: RenderOptions & { generatePadName: () => string }): OutputConfiguration => {
   const isVaapiEncoder = encoder.indexOf("vaapi") != -1;
   const isAmfEncoder = encoder.indexOf("amf") != -1;
   const inputFormat = isVaapiEncoder || isAmfEncoder ? "VAAPI" : null;
+  const inputPad = generatePadName();
+  const outputPad = generatePadName();
   return {
     inputFormat,
-    filters: [
-      crop
-        ? {
-            filter: `crop=${crop}`,
-            options: {},
-          }
-        : undefined,
-      crop
-        ? {
-            filter: inputFormat === "VAAPI" ? "scale_vaapi" : "scale",
-            options: {},
-          }
-        : undefined,
-      isAmfEncoder && inputFormat === "VAAPI"
-        ? {
-            filter: "hwmap",
-            options: {},
-          }
-        : undefined,
-    ].filter(notEmpty),
+    filters: connectFilters(
+      [
+        crop
+          ? {
+              filter: `crop=${crop}`,
+              options: {},
+            }
+          : undefined,
+        crop
+          ? {
+              filter: inputFormat === "VAAPI" ? "scale_vaapi" : "scale",
+              options: {},
+            }
+          : undefined,
+        isAmfEncoder && inputFormat === "VAAPI"
+          ? {
+              filter: "hwmap",
+              options: {},
+            }
+          : undefined,
+      ].filter(notEmpty),
+      inputPad,
+      outputPad,
+      generatePadName
+    ),
     options: [`-c:v ${encoder}`, `-qp ${VAAPI_QP}`].filter(Boolean),
+    inputPad,
+    outputPad,
   };
-};
-
-const getConversionFilters = ({
-  inputFormat,
-  outputFormat,
-  filterDeviceFormat,
-  openclMappedFromVaapi,
-}: {
-  inputFormat: HardwarePixelFormat;
-  outputFormat: HardwarePixelFormat;
-  filterDeviceFormat: HardwarePixelFormat;
-  openclMappedFromVaapi: boolean;
-}): AudioVideoFilter[] => {
-  if (inputFormat === outputFormat) {
-    return [];
-  }
-  if (outputFormat === null) {
-    return [
-      { filter: "hwdownload", options: {} },
-      {
-        filter: "format",
-        options: {
-          pix_fmts: "nv12",
-        },
-      },
-    ];
-  }
-  if (outputFormat === "OPENCL") {
-    if (inputFormat === "VAAPI" && openclMappedFromVaapi) {
-      if (filterDeviceFormat === "OPENCL") {
-        return [{ filter: "hwmap", options: {} }];
-      }
-      if (filterDeviceFormat === "VAAPI") {
-        return [{ filter: "hwmap", options: { derive_device: "vaapi" } }];
-      }
-    }
-    if (filterDeviceFormat === "OPENCL") {
-      return [
-        inputFormat !== null && { filter: "hwdownload", options: {} },
-        {
-          filter: "format",
-          options: {
-            pix_fmts: "nv12",
-          },
-        },
-        { filter: "hwupload", options: {} },
-      ].filter(notEmpty);
-    }
-  }
-  if (outputFormat === "VAAPI") {
-    if (inputFormat === "OPENCL" && openclMappedFromVaapi) {
-      return [
-        { filter: "hwmap", options: { derive_device: "vaapi", reverse: 1 } },
-      ];
-    }
-    if (filterDeviceFormat === "VAAPI") {
-      return [
-        inputFormat !== null && {
-          filter: "hwdownload",
-          options: {},
-        },
-        {
-          filter: "format",
-          options: {
-            pix_fmts: "nv12",
-          },
-        },
-        { filter: "hwupload", options: {} },
-      ].filter(notEmpty);
-    }
-  }
-  throw Error(`Cannot convert between ${inputFormat} and ${outputFormat}`);
 };
 
 const getAnalysePipeline = ({
   destFileName,
   stabilise,
   filter,
+  inputPad,
+  outputPad,
+  generatePadName,
 }: RenderOptions & {
   destFileName: string;
+  inputPad: string;
+  outputPad: string;
+  generatePadName: () => string;
 }): FilterPipeline => {
   return {
     inputFormat: null,
-    filters: [
-      filter === "vidstab" &&
-        stabilise !== "none" && {
-          filter: "vidstabdetect",
-          options: {
-            result: `${destFileName}.trf`,
-            shakiness: 10,
-            mincontrast: 0.2,
-            stepsize: 12,
-            tripod: stabilise === "fixed" ? 1 : 0,
+    inputPad,
+    filters: connectFilters(
+      [
+        filter === "vidstab" &&
+          stabilise !== "none" && {
+            filter: "vidstabdetect",
+            options: {
+              result: `${destFileName}.trf`,
+              shakiness: 10,
+              mincontrast: 0.2,
+              stepsize: 12,
+              tripod: stabilise === "fixed" ? 1 : 0,
+            },
           },
-        },
-    ].filter(notEmpty),
+      ].filter(notEmpty),
+      inputPad,
+      outputPad,
+      generatePadName
+    ),
     outputFormat: null,
+    outputPad,
   };
 };
 
@@ -343,31 +316,42 @@ const combinePipelines = ({
   pipelines,
   filterDeviceFormat,
   openclMappedFromVaapi,
+  inputPad,
+  outputPad,
+  generatePadName,
 }: {
   pipelines: FilterPipeline[];
   filterDeviceFormat: HardwarePixelFormat;
   openclMappedFromVaapi: boolean;
+  inputPad: string;
+  outputPad: string;
+  generatePadName: () => string;
 }): FilterPipeline => {
   const nonEmptyPipelines = pipelines.filter(
     (pipeline) => pipeline.filters.length > 0
   );
   if (nonEmptyPipelines.length === 0) {
     return {
+      inputPad,
       inputFormat: null,
       filters: [],
       outputFormat: null,
+      outputPad,
     };
   }
   const pipelineFilters = nonEmptyPipelines.reduce(
-    (filters: AudioVideoFilter[], pipeline, index) => {
+    (filters: FilterSpecification[], pipeline, index) => {
       return filters.concat(
         pipeline.filters,
         index < nonEmptyPipelines.length - 1
-          ? getConversionFilters({
+          ? getConversionFilterSpecs({
+              inputPad: pipeline.outputPad,
               inputFormat: pipeline.outputFormat,
               outputFormat: nonEmptyPipelines[index + 1].inputFormat,
+              outputPad: nonEmptyPipelines[index + 1].inputPad,
               filterDeviceFormat,
               openclMappedFromVaapi,
+              generatePadName,
             })
           : []
       );
@@ -375,9 +359,11 @@ const combinePipelines = ({
     []
   );
   return {
+    inputPad: nonEmptyPipelines[0].inputPad,
     inputFormat: nonEmptyPipelines[0].inputFormat,
     filters: pipelineFilters,
     outputFormat: nonEmptyPipelines[nonEmptyPipelines.length - 1].outputFormat,
+    outputPad: nonEmptyPipelines[nonEmptyPipelines.length - 1].outputPad,
   };
 };
 
@@ -387,42 +373,56 @@ const connectPipelines = ({
   output,
   filterDeviceFormat,
   openclMappedFromVaapi,
+  generatePadName,
 }: {
   input: InputConfiguration;
   pipelines: FilterPipeline[];
   output: OutputConfiguration;
   filterDeviceFormat: HardwarePixelFormat;
   openclMappedFromVaapi: boolean;
-}): AudioVideoFilter[] => {
+  generatePadName: () => string;
+}): FilterSpecification[] => {
   const combinedPipeline = combinePipelines({
     pipelines,
     filterDeviceFormat,
     openclMappedFromVaapi,
+    inputPad: generatePadName(),
+    outputPad: generatePadName(),
+    generatePadName,
   });
   if (combinedPipeline.filters.length === 0) {
     return input.filters.concat(
-      getConversionFilters({
+      getConversionFilterSpecs({
         inputFormat: input.outputFormat,
         outputFormat: output.inputFormat,
         filterDeviceFormat,
         openclMappedFromVaapi,
+        inputPad: input.outputPad,
+        outputPad: output.inputPad,
+        generatePadName,
       }),
       output.filters
     );
   }
   return input.filters.concat(
-    getConversionFilters({
+    getConversionFilterSpecs({
       inputFormat: input.outputFormat,
       outputFormat: combinedPipeline.inputFormat,
       filterDeviceFormat,
       openclMappedFromVaapi,
+      inputPad: input.outputPad,
+      outputPad: combinedPipeline.inputPad,
+      generatePadName,
     }),
     combinedPipeline.filters,
-    getConversionFilters({
+    getConversionFilterSpecs({
       inputFormat: combinedPipeline.outputFormat,
       outputFormat: output.inputFormat,
       filterDeviceFormat,
       openclMappedFromVaapi,
+      inputPad: combinedPipeline.outputPad,
+      outputPad: output.inputPad,
+      generatePadName,
     }),
     output.filters
   );
@@ -441,35 +441,48 @@ const getV360Pipeline = ({
   pitch,
   yaw,
   zoom,
+  inputPad,
+  outputPad,
+  generatePadName,
 }: RenderOptions & {
   inputWidth: number;
   inputHeight: number;
+  inputPad: string;
+  outputPad: string;
+  generatePadName: () => string;
 }): FilterPipeline => {
   return {
     inputFormat: null,
-    filters: [
-      {
-        filter: "v360",
-        options: {
-          // Input: GoPro HERO5 Black
-          input: "fisheye",
-          id_fov: inputDfov * (1 + stabiliseBuffer / 100),
+    inputPad,
+    filters: connectFilters(
+      [
+        {
+          filter: "v360",
+          options: {
+            // Input: GoPro HERO5 Black
+            input: "fisheye",
+            id_fov: inputDfov * (1 + stabiliseBuffer / 100),
 
-          // Output
-          output: projection,
-          // Diagonal FOV preserves the entire input in stereographic => rectilinear
-          d_fov: (inputDfov * 100) / (100 + (zoom || 0)),
-          w: width || (inputWidth * (upsample || 100)) / 100,
-          h: height || (inputHeight * (upsample || 100)) / 100,
+            // Output
+            output: projection,
+            // Diagonal FOV preserves the entire input in stereographic => rectilinear
+            d_fov: (inputDfov * 100) / (100 + (zoom || 0)),
+            w: width || (inputWidth * (upsample || 100)) / 100,
+            h: height || (inputHeight * (upsample || 100)) / 100,
 
-          pitch: (((pitch || 0) + 180) % 360) - 180,
-          yaw: (((yaw || 0) + 180) % 360) - 180,
-          roll: (((roll || 0) + 180) % 360) - 180,
+            pitch: (((pitch || 0) + 180) % 360) - 180,
+            yaw: (((yaw || 0) + 180) % 360) - 180,
+            roll: (((roll || 0) + 180) % 360) - 180,
 
-          interp: "lanc",
+            interp: "lanc",
+          },
         },
-      },
-    ],
+      ],
+      inputPad,
+      outputPad,
+      generatePadName
+    ),
+    outputPad,
     outputFormat: null,
   };
 };
@@ -479,26 +492,39 @@ const getVidStabPipeline = ({
   stabilise,
   stabiliseBuffer,
   stabiliseRadius,
+  inputPad,
+  outputPad,
+  generatePadName,
 }: RenderOptions & {
   destFileName: string;
+  inputPad: string;
+  outputPad: string;
+  generatePadName: () => string;
 }): FilterPipeline => {
   return {
+    inputPad,
     inputFormat: null,
-    filters: [
-      stabilise !== "none" && {
-        filter: "vidstabtransform",
-        options: {
-          input: `${destFileName}.trf`,
-          optzoom: 0,
-          zoom: -stabiliseBuffer,
-          interpol: "bicubic",
-          smoothing: stabiliseRadius,
-          crop: "black",
-          tripod: stabilise === "fixed" ? 1 : 0,
+    filters: connectFilters(
+      [
+        stabilise !== "none" && {
+          filter: "vidstabtransform",
+          options: {
+            input: `${destFileName}.trf`,
+            optzoom: 0,
+            zoom: -stabiliseBuffer,
+            interpol: "bicubic",
+            smoothing: stabiliseRadius,
+            crop: "black",
+            tripod: stabilise === "fixed" ? 1 : 0,
+          },
         },
-      },
-    ].filter(notEmpty),
+      ].filter(notEmpty),
+      inputPad,
+      outputPad,
+      generatePadName
+    ),
     outputFormat: null,
+    outputPad,
   };
 };
 
@@ -506,27 +532,41 @@ const getDewobbleProjectionPipeline = ({
   projection,
   stabiliseBuffer,
   inputDfov,
-}: RenderOptions): FilterPipeline => {
+  inputPad,
+  outputPad,
+  generatePadName,
+}: RenderOptions & {
+  inputPad: string;
+  outputPad: string;
+  generatePadName: () => string;
+}): FilterPipeline => {
   const outputProjection =
     projection === "fisheye" ? "fish" : projection === "flat" ? "rect" : null;
   if (outputProjection === null) {
     throw new Error(`Projection ${projection} not supported by Dewobble`);
   }
   return {
+    inputPad,
     inputFormat: "OPENCL",
-    filters: [
-      {
-        filter: "libdewobble",
-        options: {
-          in_p: "fish",
-          in_dfov: inputDfov * (1 + stabiliseBuffer / 100),
-          out_p: outputProjection,
-          out_dfov: inputDfov,
-          stab: "none",
+    filters: connectFilters(
+      [
+        {
+          filter: "libdewobble",
+          options: {
+            in_p: "fish",
+            in_dfov: inputDfov * (1 + stabiliseBuffer / 100),
+            out_p: outputProjection,
+            out_dfov: inputDfov,
+            stab: "none",
+          },
         },
-      },
-    ],
+      ],
+      inputPad,
+      outputPad,
+      generatePadName
+    ),
     outputFormat: "OPENCL",
+    outputPad,
   };
 };
 
@@ -536,28 +576,42 @@ const getDewobbleStabilisePipeline = ({
   inputDfov,
   stabiliseRadius,
   debug,
-}: RenderOptions): FilterPipeline => {
+  inputPad,
+  outputPad,
+  generatePadName,
+}: RenderOptions & {
+  inputPad: string;
+  outputPad: string;
+  generatePadName: () => string;
+}): FilterPipeline => {
   const outputProjection =
     projection === "fisheye" ? "fish" : projection === "flat" ? "rect" : null;
   if (outputProjection === null) {
     throw new Error(`Projection ${projection} not supported by Dewobble`);
   }
   return {
+    inputPad,
     inputFormat: "OPENCL",
-    filters: [
-      {
-        filter: "libdewobble",
-        options: {
-          in_p: "fish",
-          in_dfov: inputDfov,
-          out_p: outputProjection,
-          out_dfov: inputDfov,
-          stab: stabilise === "smooth" ? "sg" : stabilise,
-          stab_r: stabiliseRadius,
-          debug: debug ? 1 : 0,
+    filters: connectFilters(
+      [
+        {
+          filter: "libdewobble",
+          options: {
+            in_p: "fish",
+            in_dfov: inputDfov,
+            out_p: outputProjection,
+            out_dfov: inputDfov,
+            stab: stabilise === "smooth" ? "sg" : stabilise,
+            stab_r: stabiliseRadius,
+            debug: debug ? 1 : 0,
+          },
         },
-      },
-    ],
+      ],
+      inputPad,
+      outputPad,
+      generatePadName
+    ),
+    outputPad,
     outputFormat: "OPENCL",
   };
 };
@@ -565,21 +619,35 @@ const getDewobbleStabilisePipeline = ({
 const getDewobbleBufferPipeline = ({
   stabiliseBuffer,
   inputDfov,
-}: RenderOptions): FilterPipeline => {
+  inputPad,
+  outputPad,
+  generatePadName,
+}: RenderOptions & {
+  inputPad: string;
+  outputPad: string;
+  generatePadName: () => string;
+}): FilterPipeline => {
   return {
+    inputPad,
     inputFormat: "OPENCL",
-    filters: [
-      stabiliseBuffer !== 0 && {
-        filter: "libdewobble",
-        options: {
-          in_p: "fish",
-          in_dfov: inputDfov,
-          out_p: "fish",
-          out_dfov: inputDfov * (1 + stabiliseBuffer / 100),
-          stab: "none",
+    filters: connectFilters(
+      [
+        stabiliseBuffer !== 0 && {
+          filter: "libdewobble",
+          options: {
+            in_p: "fish",
+            in_dfov: inputDfov,
+            out_p: "fish",
+            out_dfov: inputDfov * (1 + stabiliseBuffer / 100),
+            stab: "none",
+          },
         },
-      },
-    ].filter(notEmpty),
+      ].filter(notEmpty),
+      inputPad,
+      outputPad,
+      generatePadName
+    ),
+    outputPad,
     outputFormat: "OPENCL",
   };
 };
@@ -589,28 +657,41 @@ const getDeshakePipeline = ({
   stabiliseBuffer,
   inputWidth,
   inputHeight,
+  inputPad,
+  outputPad,
+  generatePadName,
 }: RenderOptions & {
   inputWidth: number;
   inputHeight: number;
+  inputPad: string;
+  outputPad: string;
+  generatePadName: () => string;
 }): FilterPipeline => {
   const borderSize = stabiliseBuffer / (2 * (100 + stabiliseBuffer));
   return {
+    inputPad,
     inputFormat: null,
-    filters: [
-      {
-        filter: "deshake",
-        options: {
-          edge: "blank",
-          blocksize: 40,
-          rx: 32,
-          ry: 32,
-          x: inputWidth * borderSize,
-          y: inputHeight * borderSize,
-          w: inputWidth * (1 - borderSize),
-          h: inputHeight * (1 - borderSize),
+    filters: connectFilters(
+      [
+        {
+          filter: "deshake",
+          options: {
+            edge: "blank",
+            blocksize: 40,
+            rx: 32,
+            ry: 32,
+            x: inputWidth * borderSize,
+            y: inputHeight * borderSize,
+            w: inputWidth * (1 - borderSize),
+            h: inputHeight * (1 - borderSize),
+          },
         },
-      },
-    ],
+      ],
+      inputPad,
+      outputPad,
+      generatePadName
+    ),
+    outputPad,
     outputFormat: null,
   };
 };
@@ -620,40 +701,56 @@ const getDeshakeOpenClPipeline = ({
   stabiliseRadius,
   frameRate,
   debug,
-}: RenderOptions & { frameRate: number; debug: boolean }): FilterPipeline => {
+  inputPad,
+  outputPad,
+  generatePadName,
+}: RenderOptions & {
+  frameRate: number;
+  debug: boolean;
+  inputPad: string;
+  outputPad: string;
+  generatePadName: () => string;
+}): FilterPipeline => {
   return {
+    inputPad,
     inputFormat: debug ? null : "OPENCL",
-    filters: [
-      debug && {
-        filter: "format",
-        options: {
-          pix_fmts: "rgba",
+    filters: connectFilters(
+      [
+        debug && {
+          filter: "format",
+          options: {
+            pix_fmts: "rgba",
+          },
         },
-      },
-      debug && {
-        filter: "hwupload",
-        options: {},
-      },
-      {
-        filter: "deshake_opencl",
-        options: {
-          tripod: stabilise === "fixed" ? 1 : 0,
-          adaptive_crop: 0,
-          smooth_window_multiplier: (stabiliseRadius * 2) / frameRate,
-          debug: 1,
+        debug && {
+          filter: "hwupload",
+          options: {},
         },
-      },
-      debug && {
-        filter: "hwdownload",
-        options: {},
-      },
-      debug && {
-        filter: "format",
-        options: {
-          pix_fmts: "rgba",
+        {
+          filter: "deshake_opencl",
+          options: {
+            tripod: stabilise === "fixed" ? 1 : 0,
+            adaptive_crop: 0,
+            smooth_window_multiplier: (stabiliseRadius * 2) / frameRate,
+            debug: 1,
+          },
         },
-      },
-    ].filter(notEmpty),
+        debug && {
+          filter: "hwdownload",
+          options: {},
+        },
+        debug && {
+          filter: "format",
+          options: {
+            pix_fmts: "rgba",
+          },
+        },
+      ].filter(notEmpty),
+      inputPad,
+      outputPad,
+      generatePadName
+    ),
+    outputPad,
     outputFormat: debug ? null : "OPENCL",
   };
 };
@@ -666,9 +763,19 @@ const getRenderPipeline = (
     destFileName: string;
     filterDeviceFormat: HardwarePixelFormat;
     openclMappedFromVaapi: boolean;
+    inputPad: string;
+    outputPad: string;
+    generatePadName: () => string;
   }
 ) => {
-  const { filter, filterDeviceFormat, openclMappedFromVaapi } = options;
+  const {
+    filter,
+    filterDeviceFormat,
+    openclMappedFromVaapi,
+    inputPad,
+    outputPad,
+    generatePadName,
+  } = options;
   switch (filter) {
     case "vidstab": {
       return combinePipelines({
@@ -678,6 +785,9 @@ const getRenderPipeline = (
         ],
         filterDeviceFormat,
         openclMappedFromVaapi,
+        inputPad,
+        outputPad,
+        generatePadName,
       });
     }
     case "deshake": {
@@ -689,6 +799,9 @@ const getRenderPipeline = (
         ],
         filterDeviceFormat,
         openclMappedFromVaapi,
+        inputPad,
+        outputPad,
+        generatePadName,
       });
     }
     case "deshake_opencl": {
@@ -700,6 +813,9 @@ const getRenderPipeline = (
         ],
         filterDeviceFormat,
         openclMappedFromVaapi,
+        inputPad,
+        outputPad,
+        generatePadName,
       });
     }
     case "dewobble": {
@@ -719,12 +835,22 @@ const analyse = (
   analyseQueue.add(
     () =>
       new Promise<void>(async (resolve, reject) => {
-        const inputConfiguration = getInputConfiguration(options);
+        const generatePadName = makeGeneratePadName();
+        const inputConfiguration = getInputConfiguration({
+          ...options,
+          generatePadName,
+        });
         const analysePipeline = getAnalysePipeline({
           destFileName,
           ...options,
+          inputPad: generatePadName(),
+          outputPad: "output",
+          generatePadName,
         });
-        if (analysePipeline.filters.length === 0) {
+        if (
+          analysePipeline.filters.length === 0 ||
+          !analysePipeline.filters.some(({ filter }) => filter !== "null")
+        ) {
           return resolve();
         }
         return Ffmpeg()
@@ -737,17 +863,21 @@ const analyse = (
           .on("end", resolve)
           .input(sourceFileName)
           .inputOptions(inputConfiguration.inputOptions)
-          .videoFilters(
+          .filterGraph(
             [
               ...inputConfiguration.filters,
-              ...getConversionFilters({
+              ...getConversionFilterSpecs({
+                inputPad: inputConfiguration.outputPad,
                 inputFormat: inputConfiguration.outputFormat,
                 outputFormat: analysePipeline.inputFormat,
+                outputPad: analysePipeline.inputPad,
                 filterDeviceFormat: inputConfiguration.filterDeviceFormat,
                 openclMappedFromVaapi: inputConfiguration.openclMappedFromVaapi,
+                generatePadName,
               }),
               ...analysePipeline.filters,
-            ].filter(notEmpty)
+            ].filter(notEmpty),
+            analysePipeline.outputPad
           )
           .format("null")
           .output("-")
@@ -787,19 +917,30 @@ const encode = async (
           parseNumber(frameRateComponents[0]) /
           parseNumber(frameRateComponents[1]);
 
-        const inputConfiguration = getInputConfiguration(options);
+        const generatePadName = makeGeneratePadName();
+
+        const inputConfiguration = getInputConfiguration({
+          ...options,
+          generatePadName,
+        });
 
         const stabilisePipeline = getRenderPipeline({
           ...options,
+          inputPad: generatePadName(),
+          outputPad: generatePadName(),
           inputWidth,
           inputHeight,
           destFileName,
           filterDeviceFormat: inputConfiguration.filterDeviceFormat,
           openclMappedFromVaapi: inputConfiguration.openclMappedFromVaapi,
+          generatePadName,
           frameRate,
         });
 
-        const outputConfiguration = getOutputConfiguration(options);
+        const outputConfiguration = getOutputConfiguration({
+          ...options,
+          generatePadName,
+        });
 
         return Ffmpeg()
           .on("start", console.log)
@@ -812,14 +953,16 @@ const encode = async (
           .on("end", resolve)
           .input(sourceFileName)
           .inputOptions(inputConfiguration.inputOptions)
-          .videoFilters(
+          .complexFilter(
             connectPipelines({
               input: inputConfiguration,
               pipelines: [stabilisePipeline],
               output: outputConfiguration,
               filterDeviceFormat: inputConfiguration.filterDeviceFormat,
               openclMappedFromVaapi: inputConfiguration.openclMappedFromVaapi,
-            })
+              generatePadName,
+            }),
+            outputConfiguration.outputPad
           )
           .output(destFileName)
           .outputOptions(outputConfiguration.options)
