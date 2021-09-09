@@ -151,8 +151,15 @@ program
     "The encoder used for the output video",
     "libx264"
   )
+  .option(
+    "--frame-rate <fps>",
+    "Speed up or slow down output video by setting frame rate",
+    parseNumber,
+    null
+  )
   .option("--compare", "Compare multiple filters", false)
   .option("--debug", "Include debugging information in the output", false)
+  .option("-v, --verbosity <level>", "FFmpeg logging verbosity", identity, null)
   .action(wrapError(render));
 
 program.parse(process.argv);

@@ -75,8 +75,10 @@ type RenderOptions = {
   openClPlatform: number | null;
   mapOpenClFromVaapi: boolean;
   encoder: string;
+  frameRate: number | null;
   debug: boolean;
   compare: boolean;
+  verbosity: string | null;
 };
 
 const makeGeneratePadName = () => {
@@ -242,8 +244,15 @@ type OutputConfiguration = {
 const getOutputConfiguration = ({
   encoder,
   crop,
+  frameRate,
+  inputFrameRate,
+  specifiedFrameRate,
   generatePadName,
-}: RenderOptions & { generatePadName: () => string }): OutputConfiguration => {
+}: RenderOptions & {
+  generatePadName: () => string;
+  inputFrameRate: number;
+  specifiedFrameRate: number | null;
+}): OutputConfiguration => {
   const isVaapiEncoder = encoder.indexOf("vaapi") != -1;
   const isAmfEncoder = encoder.indexOf("amf") != -1;
   const inputFormat = isVaapiEncoder || isAmfEncoder ? "VAAPI" : null;
@@ -271,12 +280,24 @@ const getOutputConfiguration = ({
               options: {},
             }
           : undefined,
+        frameRate
+          ? {
+              filter: "setpts",
+              options: {
+                expr: `PTS*${inputFrameRate / frameRate}`,
+              },
+            }
+          : undefined,
       ].filter(notEmpty),
       inputPad,
       outputPad,
       generatePadName
     ),
-    options: [`-c:v ${encoder}`, `-qp ${VAAPI_QP}`].filter(Boolean),
+    options: [
+      `-c:v ${encoder}`,
+      `-qp ${VAAPI_QP}`,
+      frameRate && specifiedFrameRate && `-r ${frameRate}`,
+    ].filter(notEmpty),
     inputPad,
     outputPad,
   };
@@ -444,6 +465,7 @@ const getV360Pipeline = ({
   stabiliseBuffer,
   projection,
   inputDfov,
+  outputDfov,
   width,
   height,
   inputWidth,
@@ -476,7 +498,7 @@ const getV360Pipeline = ({
             // Output
             output: projection,
             // Diagonal FOV preserves the entire input in stereographic => rectilinear
-            d_fov: (inputDfov * 100) / (100 + (zoom || 0)),
+            d_fov: outputDfov,
             w: width || (inputWidth * (upsample || 100)) / 100,
             h: height || (inputHeight * (upsample || 100)) / 100,
 
@@ -814,12 +836,12 @@ const getDeshakeOpenClPipeline = ({
   debug,
   inputPad,
   outputPad,
-  frameRate,
+  inputFrameRate,
   generatePadName,
 }: RenderOptions & {
   inputPad: string;
   outputPad: string;
-  frameRate: number;
+  inputFrameRate: number;
   generatePadName: () => string;
 }): FilterPipeline => ({
   inputPad,
@@ -841,7 +863,7 @@ const getDeshakeOpenClPipeline = ({
         options: {
           tripod: stabilise === "fixed" ? 1 : 0,
           adaptive_crop: 0,
-          smooth_window_multiplier: (stabiliseRadius * 2) / frameRate,
+          smooth_window_multiplier: (stabiliseRadius * 2) / inputFrameRate,
           debug: debug ? 1 : 0,
         },
       },
@@ -873,7 +895,7 @@ const getRenderPipeline = (
     focalPointX?: number;
     focalPointY?: number;
     outputDfov: number | null;
-    frameRate: number;
+    inputFrameRate: number;
     destFileName: string;
     filterDeviceFormat: HardwarePixelFormat;
     openclMappedFromVaapi: boolean;
@@ -968,7 +990,7 @@ const getComparisonPipeline = (
   options: RenderOptions & {
     inputWidth: number;
     inputHeight: number;
-    frameRate: number;
+    inputFrameRate: number;
     destFileName: string;
     filterDeviceFormat: HardwarePixelFormat;
     openclMappedFromVaapi: boolean;
@@ -1176,6 +1198,13 @@ const analyse = (
       })
   );
 
+const parseFrameRate = (rateString: string) => {
+  const frameRateComponents = rateString.split("/");
+  return (
+    parseNumber(frameRateComponents[0]) / parseNumber(frameRateComponents[1])
+  );
+};
+
 const encode = async (
   sourceFileName: string,
   destFileName: string,
@@ -1195,6 +1224,7 @@ const encode = async (
           width: inputWidth,
           height: inputHeight,
           avg_frame_rate,
+          r_frame_rate,
         } = videoStream;
         if (
           inputWidth === undefined ||
@@ -1204,9 +1234,10 @@ const encode = async (
           throw new Error("Failed to find video dimensions");
         }
         const frameRateComponents = avg_frame_rate.split("/");
-        const frameRate =
-          parseNumber(frameRateComponents[0]) /
-          parseNumber(frameRateComponents[1]);
+        const inputFrameRate = parseFrameRate(avg_frame_rate);
+        const specifiedFrameRate = r_frame_rate
+          ? parseFrameRate(r_frame_rate)
+          : null;
 
         const generatePadName = makeGeneratePadName();
 
@@ -1228,12 +1259,14 @@ const encode = async (
           filterDeviceFormat: inputConfiguration.filterDeviceFormat,
           openclMappedFromVaapi: inputConfiguration.openclMappedFromVaapi,
           generatePadName,
-          frameRate,
+          inputFrameRate,
         });
 
         const outputConfiguration = getOutputConfiguration({
           ...options,
           generatePadName,
+          inputFrameRate,
+          specifiedFrameRate,
         });
 
         return Ffmpeg()
@@ -1259,7 +1292,12 @@ const encode = async (
             outputConfiguration.outputPad
           )
           .output(destFileName)
-          .outputOptions(outputConfiguration.options)
+          .outputOptions(
+            [
+              ...outputConfiguration.options,
+              options.verbosity && `-v ${options.verbosity}`,
+            ].filter(notEmpty)
+          )
           .run();
       })
   );
