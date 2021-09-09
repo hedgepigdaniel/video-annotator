@@ -18,6 +18,10 @@ export const parseNumber = (input: string) => {
   return result;
 };
 
+export const parseArray = (input: string) => {
+  return input.split(",");
+};
+
 export const notEmpty = <Value>(
   value: Value | null | undefined | false | 0
 ): value is Value => Boolean(value);

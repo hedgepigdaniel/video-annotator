@@ -8,7 +8,7 @@ import { Command } from "commander";
 
 import { join } from "./join";
 import { render } from "./render";
-import { identity, parseNumber } from "./utils";
+import { identity, parseArray, parseNumber } from "./utils";
 
 const wrapError =
   (action: (...args: any[]) => Promise<unknown>) =>
@@ -157,7 +157,7 @@ program
     parseNumber,
     null
   )
-  .option("--compare", "Compare multiple filters", false)
+  .option("--compare <filters>", "Compare multiple filters", parseArray, null)
   .option("--debug", "Include debugging information in the output", false)
   .option("-v, --verbosity <level>", "FFmpeg logging verbosity", identity, null)
   .action(wrapError(render));

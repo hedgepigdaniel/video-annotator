@@ -77,7 +77,7 @@ type RenderOptions = {
   encoder: string;
   frameRate: number | null;
   debug: boolean;
-  compare: boolean;
+  compare: StabilisationFilter[] | null;
   verbosity: string | null;
 };
 
@@ -967,7 +967,7 @@ const getRenderPipeline = (
 export const multiplyDimensions = (
   projection: Projection,
   fov: number,
-  multiple: 2
+  multiple: number
 ) => {
   switch (projection) {
     case "fisheye": {
@@ -977,13 +977,52 @@ export const multiplyDimensions = (
       return (
         2 *
         (180 / Math.PI) *
-        Math.atan(2 * Math.tan(((fov / 2) * Math.PI) / 180))
+        Math.atan(multiple * Math.tan(((fov / 2) * Math.PI) / 180))
       );
     }
     default: {
       throw new Error(`unknown projection ${projection}`);
     }
   }
+};
+
+const getComparisonGridSize = (
+  numStreams: number,
+  preferredRatio: number
+): [width: number, height: number] => {
+  const landscapeRatio =
+    preferredRatio > 1 ? 1 / preferredRatio : preferredRatio;
+
+  const getRatioInfo = (shortSide: number) => {
+    const longSide = Math.ceil(numStreams / shortSide);
+    const gridArea = longSide * shortSide;
+    const preferredArea =
+      Math.max(longSide, shortSide / landscapeRatio) *
+      Math.max(shortSide, longSide * landscapeRatio);
+    const areaUsed =
+      shortSide / longSide < landscapeRatio
+        ? (shortSide / longSide) * landscapeRatio
+        : (longSide / shortSide) * landscapeRatio;
+    return {
+      shortSide,
+      longSide,
+      areaUsed: gridArea / preferredArea,
+    };
+  };
+
+  let bestRatio = getRatioInfo(Math.ceil(Math.sqrt(numStreams)));
+
+  while (bestRatio.shortSide > 1) {
+    const nextRatio = getRatioInfo(bestRatio.shortSide - 1);
+    if (nextRatio.areaUsed > bestRatio.areaUsed) {
+      bestRatio = nextRatio;
+    } else {
+      break;
+    }
+  }
+  return preferredRatio > 1
+    ? [bestRatio.longSide, bestRatio.shortSide]
+    : [bestRatio.shortSide, bestRatio.longSide];
 };
 
 const getComparisonPipeline = (
@@ -1009,36 +1048,80 @@ const getComparisonPipeline = (
     inputDfov,
     outputDfov,
     projection,
+    compare,
   } = options;
 
   if (stabilise === "none") {
     throw new Error(`Comparison not possible without stabilisation`);
   }
 
-  const scaledWidth = inputWidth / 2;
-  const scaledHeight = inputHeight / 2;
+  if (compare === null) {
+    throw new Error(`should not happen`);
+  }
 
-  const scaledPad1 = generatePadName();
-  const scaledPad2 = generatePadName();
+  const filters: StabilisationFilter[] = ["dewobble", ...compare];
 
-  const hwPad1 = generatePadName();
-  const hwPad2 = generatePadName();
-  const hwPad3 = generatePadName();
+  const [gridWidth, gridHeight] = getComparisonGridSize(
+    filters?.length,
+    16 / 10
+  );
 
-  const topLeftAndBasePad = generatePadName();
-  const topRightPad = generatePadName();
-  const bottomLeftPad = generatePadName();
-  const bottomRightPad = generatePadName();
+  const scale =
+    gridWidth / inputWidth > gridHeight / inputHeight
+      ? 1 / gridHeight
+      : 1 / gridWidth;
 
-  const overlayPad2 = generatePadName();
-  const overlayPad3 = generatePadName();
+  const scaledWidth = Math.floor(inputWidth * scale);
+  const scaledHeight = Math.floor(inputHeight * scale);
 
-  const filters: StabilisationFilter[] = [
-    "dewobble",
-    "deshake",
-    "deshake_opencl",
-    "vidstab",
-  ];
+  const dFovRatio =
+    Math.sqrt(
+      inputWidth * gridWidth * (inputWidth * gridWidth) +
+        inputHeight * gridHeight * (inputHeight * gridHeight)
+    ) / Math.sqrt(inputWidth * inputWidth + inputHeight * inputHeight);
+
+  const inputPads = filters.map(() => generatePadName());
+  const outputPads = filters.map(() => generatePadName());
+
+  const pipelines = [
+    getRenderPipeline({
+      ...options,
+      filter: filters[0],
+      inputPad: inputPads[0],
+      outputPad: outputPads[0],
+      inputWidth: scaledWidth,
+      inputHeight: scaledHeight,
+      outputWidth: scaledWidth * gridWidth,
+      outputHeight: scaledHeight * gridHeight,
+      focalPointX: scaledWidth / 2,
+      focalPointY: scaledHeight / 2,
+      outputDfov: multiplyDimensions(
+        projection,
+        outputDfov || inputDfov,
+        dFovRatio
+      ),
+      stabilise: "none",
+    }),
+  ].concat(
+    filters.slice(1).map((filter, index) =>
+      getRenderPipeline({
+        ...options,
+        filter,
+        inputPad: inputPads[index + 1],
+        outputPad: outputPads[index + 1],
+        inputWidth: scaledWidth,
+        inputHeight: scaledHeight,
+      })
+    )
+  );
+
+  const inputCpuPads = inputPads.filter(
+    (pad, index) => pipelines[index].inputFormat === null
+  );
+  const inputOpenClPads = inputPads.filter(
+    (pad, index) => pipelines[index].inputFormat === "OPENCL"
+  );
+  const uploadPad = generatePadName();
 
   return {
     inputPad,
@@ -1056,11 +1139,11 @@ const getComparisonPipeline = (
           },
           {
             filter: "split",
-            options: { outputs: 2 },
+            options: { outputs: inputCpuPads.length + 1 },
           },
         ],
         inputPad,
-        [scaledPad1, scaledPad2],
+        [uploadPad, ...inputCpuPads],
         generatePadName
       ),
       ...connectFilters(
@@ -1071,69 +1154,44 @@ const getComparisonPipeline = (
           },
           {
             filter: "split",
-            options: { outputs: 3 },
+            options: { outputs: inputOpenClPads.length },
           },
         ],
-        scaledPad1,
-        [hwPad1, hwPad2, hwPad3],
+        uploadPad,
+        inputOpenClPads,
         generatePadName
       ),
-      ...getRenderPipeline({
-        ...options,
-        filter: "dewobble",
-        inputPad: hwPad1,
-        outputPad: topLeftAndBasePad,
-        inputWidth: scaledWidth,
-        inputHeight: scaledHeight,
-        outputWidth: inputWidth,
-        outputHeight: inputHeight,
-        focalPointX: scaledWidth / 2,
-        focalPointY: scaledHeight / 2,
-        outputDfov: multiplyDimensions(projection, outputDfov || inputDfov, 2),
-        stabilise: "none",
-      }).filters,
-      ...getRenderPipeline({
-        ...options,
-        filter: "dewobble",
-        inputPad: hwPad2,
-        outputPad: topRightPad,
-        inputWidth: scaledWidth,
-        inputHeight: scaledHeight,
-      }).filters,
-      ...getRenderPipeline({
-        ...options,
-        filter: "vidstab",
-        inputPad: scaledPad2,
-        outputPad: bottomLeftPad,
-        inputWidth: scaledWidth,
-        inputHeight: scaledHeight,
-      }).filters,
-      ...getRenderPipeline({
-        ...options,
-        filter: "deshake",
-        inputPad: hwPad3,
-        outputPad: bottomRightPad,
-        inputWidth: scaledWidth,
-        inputHeight: scaledHeight,
-      }).filters,
-      {
-        inputs: [topLeftAndBasePad, topRightPad],
-        filter: "overlay_opencl",
-        options: { x: scaledWidth },
-        outputs: [overlayPad2],
-      },
-      {
-        inputs: [overlayPad2, bottomLeftPad],
-        filter: "overlay_opencl",
-        options: { y: scaledHeight },
-        outputs: [overlayPad3],
-      },
-      {
-        inputs: [overlayPad3, bottomRightPad],
-        filter: "overlay_opencl",
-        options: { x: scaledWidth, y: scaledHeight },
-        outputs: [outputPad],
-      },
+      ...pipelines.flatMap((pipeline) => pipeline.filters),
+      ...outputPads.slice(2).reduce(
+        (filters: FilterSpecification[], overlayPad, index) => {
+          const lastFilter = filters[filters.length - 1];
+          const intermediatePad = generatePadName();
+          return [
+            ...filters.slice(0, filters.length - 1),
+            { ...lastFilter, outputs: [intermediatePad] },
+            {
+              inputs: [intermediatePad, overlayPad],
+              filter: "overlay_opencl",
+              options: {
+                x: scaledWidth * ((index + 2) % gridWidth),
+                y: scaledHeight * Math.floor((index + 2) / gridWidth),
+              },
+              outputs: [outputPad],
+            },
+          ];
+        },
+        [
+          {
+            inputs: [outputPads[0], outputPads[1]],
+            filter: "overlay_opencl",
+            options: {
+              x: scaledWidth * (1 % gridWidth),
+              y: scaledHeight * Math.floor(1 / gridWidth),
+            },
+            outputs: [outputPad],
+          },
+        ]
+      ),
     ],
     outputPad,
     outputFormat: "OPENCL",
