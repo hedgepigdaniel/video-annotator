@@ -163,6 +163,10 @@ program
     "libx264"
   )
   .option(
+    "--no-output",
+    "Discard output from filters, skip encoding and output"
+  )
+  .option(
     "--frame-rate <fps>",
     "Speed up or slow down output video by setting frame rate",
     parseNumber,

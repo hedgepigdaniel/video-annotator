@@ -81,6 +81,7 @@ type RenderOptions = {
   debug: boolean;
   compare: StabilisationFilter[] | null;
   verbosity: string | null;
+  output: boolean;
 };
 
 const makeGeneratePadName = () => {
@@ -265,6 +266,7 @@ const getOutputConfiguration = ({
   inputFrameRate,
   specifiedFrameRate,
   generatePadName,
+  output,
 }: RenderOptions & {
   generatePadName: () => string;
   inputFrameRate: number;
@@ -272,7 +274,11 @@ const getOutputConfiguration = ({
 }): OutputConfiguration => {
   const isVaapiEncoder = encoder.indexOf("vaapi") != -1;
   const isAmfEncoder = encoder.indexOf("amf") != -1;
-  const inputFormat = isVaapiEncoder || isAmfEncoder ? "VAAPI" : null;
+  const inputFormat = output
+    ? isVaapiEncoder || isAmfEncoder
+      ? "VAAPI"
+      : null
+    : "OPENCL";
   const inputPad = generatePadName();
   const outputPad = generatePadName();
   return {
@@ -311,8 +317,9 @@ const getOutputConfiguration = ({
       generatePadName
     ),
     options: [
-      `-c:v ${encoder}`,
+      output && `-c:v ${encoder}`,
       `-qp ${VAAPI_QP}`,
+      !output && `-f null`,
       frameRate && specifiedFrameRate && `-r ${frameRate}`,
     ].filter(notEmpty),
     inputPad,
