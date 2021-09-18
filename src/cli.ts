@@ -90,6 +90,12 @@ program
     90
   )
   .option(
+    "--interpolate-radius <number>",
+    "the number of frames to look behind to interpolate camera position",
+    parseNumber,
+    30
+  )
+  .option(
     "--stabilise-buffer <percent>",
     "Buffer space to add around input during stabilisation to avoid cropping",
     parseNumber,
@@ -144,6 +150,11 @@ program
   .option(
     "--no-map-open-cl-from-vaapi",
     "Use VAAPI device for OpenCL (Intel only)",
+    false
+  )
+  .option(
+    "--copy-vaapi-frames",
+    "Copy input VAAPI frames (useful to avoid hardware frame pool limit)",
     false
   )
   .option(

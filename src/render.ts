@@ -65,6 +65,7 @@ type RenderOptions = {
   filter: StabilisationFilter;
   stabilise: "none" | "fixed" | "smooth";
   stabiliseRadius: number;
+  interpolateRadius: number;
   stabiliseBuffer: number;
   inputDfov: number;
   outputDfov: number | null;
@@ -74,6 +75,7 @@ type RenderOptions = {
   vaapiVendor: VaapiVendor;
   openClPlatform: number | null;
   mapOpenClFromVaapi: boolean;
+  copyVaapiFrames: boolean;
   encoder: string;
   frameRate: number | null;
   debug: boolean;
@@ -192,11 +194,14 @@ const getInputConfiguration = ({
   vaapiVendor,
   openClPlatform,
   mapOpenClFromVaapi,
+  copyVaapiFrames,
   start,
   duration,
   end,
   upsample,
   generatePadName,
+  stabiliseRadius,
+  interpolateRadius,
 }: RenderOptions & { generatePadName: () => string }): InputConfiguration => {
   const hardwareOptions = getHardwareConfiguration({
     hwAccel,
@@ -211,6 +216,10 @@ const getInputConfiguration = ({
       start && `-ss ${start}`,
       duration && `-t ${duration}`,
       end && `-to ${end}`,
+      hardwareOptions.outputFormat === "VAAPI" &&
+        hardwareOptions.openclMappedFromVaapi &&
+        !copyVaapiFrames &&
+        `-extra_hw_frames ${stabiliseRadius + interpolateRadius}`,
     ].filter(notEmpty),
     filters: connectFilters(
       [
@@ -221,12 +230,20 @@ const getInputConfiguration = ({
             h: `ih*${(upsample || 100) / 100}`,
           },
         },
+        hardwareOptions.outputFormat === "VAAPI" &&
+          copyVaapiFrames && {
+            filter: "hwdownload",
+            options: {},
+          },
       ].filter(notEmpty),
       "0:v",
       outputPad,
       generatePadName
     ),
-    outputFormat: hardwareOptions.outputFormat,
+    outputFormat:
+      hardwareOptions.outputFormat === "VAAPI" && copyVaapiFrames
+        ? null
+        : hardwareOptions.outputFormat,
     filterDeviceFormat: hardwareOptions.filterDeviceFormat,
     openclMappedFromVaapi: hardwareOptions.openclMappedFromVaapi,
     outputPad,
